@@ -1,2 +1,9 @@
 # MetaCellaR
-metacelling things
+- To summerize single cells based on k-medoids
+- The clustering is done per cell type
+The script takes the following as input arguments:
+- Use the `-file` argument followed by a file path to where the single cell, either a csv file or a Seurat object, is stored. In case of the csv file, the rows and columns must be annotated by gene names and cell names, respectively.
+- In case of a csv input file explained above, the `-celltype` argument must be a 2-column table containing the mapping for cells to their cell types. First column must be the same as cell names provided in the csv file, and second column the cell types. In case of the Seurat object, the `-celltype` argument must be used to refer to the slot where the cell type annotation of single cells are stored in the Suerat object. For instance, is the full way to access the cell types stored in a Seurat object called `S` is to call `S@meta.data$celltype` then the user needs to type in `-celltype meta.data$celltype` to indicate that the cell type annotations for the single cell gene expression data are accessible via those slots/items.
+- `-RNA` is used only for the Seurat object. This argument refers to the slot where the RNA counts are stored in the Suerat object. For instance, is the full way to access the RNA counts stored in a Seurat object called `S` is to call `S@assays$RNA@counts` then the user needs to type in `-celltype assays$RNA@counts` to indicate that the single cell gene expression counts are accessible via those slots/items.
+- Argument `-k` can be used to specify the number of clusters for the k-medoids clustering. If not provided by the user, `k` is defined based on the number of potential groups that have at least 30 cells inside (k <- #cells in a cell type / 30)
+- To specify an output directory in where the results will be stored, the user can supply the `-output` argument.
