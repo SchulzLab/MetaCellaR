@@ -46,6 +46,7 @@ if(!length(output_hit)){
   output_file <- file_name
 }else{
   output_file <- arg_tokens[output_hit + 1]
+  ifelse(!dir.exists(output_file), dir.create(output_file), FALSE)
 }
 ########################
 if(!csv_flag){
