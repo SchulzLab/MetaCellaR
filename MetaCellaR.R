@@ -1,9 +1,8 @@
 ### To summerize single cells based on k-medoids ###
 ### The clustering is done per cell type ###
-### parameter k, if not provided by the user, is defined based on the number of potential groups that have at least 30 cells inside (k <- ncol(CT_cluster) / 30)
+### parameter k is defined based on the number of potential groups that have at least 30 cells inside (k <- ncol(CT_cluster) / 30)
 
 set.seed(0)
-library(Seurat)
 library(cluster)
 ########################
 summary_method <- "kmed_means" #kmed
@@ -43,14 +42,15 @@ if(length(file_hit)){
   stop("Argument -file is missing. Please provide the path to your input file using the -file option followed by the path to your file!")
 }
 if(!length(output_hit)){
-  output_file <- file_name
+  output_file <- getwd()
 }else{
   output_file <- arg_tokens[output_hit + 1]
-  ifelse(!dir.exists(output_file), dir.create(output_file), FALSE)
 }
 ########################
 if(!csv_flag){
+  library(Seurat)
   Rds_name <- load(file_name)
+  print("Done loading the Seurat object")
   Sub <- get(Rds_name) ##To make it generalizable for Suerat object stored with any name
   print("Done loading Rds!")
   RNAcounts <- eval(parse(text= paste0(Rds_name, "@", RNA_count_expression))) #Sub@assays$RNA@counts
@@ -77,7 +77,8 @@ for(ct in cell_types){
     print(paste("Setting k to", k))
   }
   if(summary_method == "kmed" || summary_method == "kmed_means"){
-    if(length(k) >0 && k > 3){
+    print(paste("k=", k, "ncol(CT_cluster)=", ncol(CT_cluster)))
+    if(length(k) >0 && k > 3 && k < ncol(CT_cluster)){
       class(CT_cluster)
       if(iter_flag){
         for(iter in seq(10)){
@@ -96,6 +97,7 @@ for(ct in cell_types){
     }
   }else if(summary_method == "kmeans"){
     if(length(k) >0 && k > 3){
+      print(dim(CT_cluster))
       if(class(CT_cluster) == "numeric"){
         next;
       }
@@ -141,14 +143,15 @@ for(i in seq(length(clusters)))
   }
 colnames(mat) <- mc_names
 
-write.csv(mat, paste0(output_file, "_cellSummarized_", summary_method, ".csv"))
-save(clusters, mc_names, file= paste0(output_file, "_", summary_method, "_clustered.RData"))
-print(paste("Done writing results to the output files:", paste0(output_file, "_cellSummarized_", summary_method, ".csv"), "and", paste0(output_file, "_", summary_method, "_clustered.RData")))
+dir.create(output_file)
+write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
+save(clusters, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
+print("Done!")
 Rtnse_plot <- F
 if(Rtnse_plot){
   library(Rtsne)
   Rtsne_whole_res <- Rtsne(as.matrix(RNAcounts), check_duplicates= F)
-  pdf(paste0(output_file, "_", summary_method, "_Rtsne.pdf"))
+  pdf(paste0(output_file, "/tSNE_", summary_method, "_Rtsne.pdf"))
   plot(Rtsne_whole_res$Y)
   dev.off()
 }
