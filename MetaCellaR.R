@@ -4,6 +4,7 @@
 
 set.seed(0)
 library(cluster)
+library(knn.covertree)
 ########################
 summary_method <- "kmed_means" #kmed
 iter_flag <- F
@@ -15,18 +16,20 @@ csv_flag <- F
 ########################
 ## Parse arguments
 argsexpr <- commandArgs(trailingOnly= T)
-defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k")
+defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
 RNA_hit <- which(arg_tokens == defined_args[2])
 celltype_hit <- which(arg_tokens == defined_args[3])
 output_hit <- which(arg_tokens == defined_args[4])
 k_hit <- which(arg_tokens == defined_args[5])
+assay_hit <- which(arg_tokens == defined_args[6])
 if(length(file_hit)){
   if(length(RNA_hit) && length(celltype_hit)){
     file_name <- arg_tokens[file_hit + 1]
     RNA_count_expression <- arg_tokens[RNA_hit + 1]
     celltype_expression <- arg_tokens[celltype_hit + 1]
+    assay_expression <- arg_tokens[assay_hit + 1]
   }
   else{# CSV file
     if(!length(celltype_hit)){
@@ -49,27 +52,54 @@ if(!length(output_hit)){
 ########################
 if(!csv_flag){
   library(Seurat)
-  Rds_name <- load(file_name)
+  if(strsplit(file_name, "\\.")[[1]][2] == "rds"){
+    print("Reading the Seurat object")
+    Sub <- readRDS(file_name)
+    Rds_name <- "Sub"
+  }else{
+    print("Loading the Seurat object")
+    Rds_name <- load(file_name)
+    Sub <- get(Rds_name) ##To make it generalizable for Suerat object stored with any name
+  }
   print("Done loading the Seurat object")
-  Sub <- get(Rds_name) ##To make it generalizable for Suerat object stored with any name
   print("Done loading Rds!")
   RNAcounts <- eval(parse(text= paste0(Rds_name, "@", RNA_count_expression))) #Sub@assays$RNA@counts
   celltypes <- eval(parse(text= paste0(Rds_name, "@", celltype_expression)))
   cell_types <- unique(as.character(celltypes))
+  if(length(assay_hit)){
+	  assays <- eval(parse(text= paste0(Rds_name, "@", assay_expression)))
+
+	  rna_hits <- which(tolower(assays) == "scrna-seq" | tolower(assays) == "scrna" | tolower(assays) == "scrna" | tolower(assays) == "rna")
+	  RNAcounts <- RNAcounts[, rna_hits]
+	  ATACcounts <- RNAcounts[, -rna_hits]
+
+	  RNA_celltypes <- celltypes[rna_hits]
+	  ATAC_celltypes <- celltypes[-rna_hits]
+		RNA_umap <- Sub[["umap"]]@cell.embeddings[rna_hits, ]
+		ATAC_umap <- Sub[["umap"]]@cell.embeddings[-rna_hits, ]
+	  celltypes <- RNA_celltypes
+	  cell_types <- unique(celltypes)
+  }
 }else{
   cell_types <- unique(csv_cells[, 2])
 }
 clusters <- list()
 all_mediods <- list()
-
+RNA_metacell_umap <- NULL
+cell2metacell_info <- NULL
+print(dim(RNAcounts))
 for(ct in cell_types){
   print(ct)
   if(!csv_flag){
-    CT_cluster <- RNAcounts[, rownames(eval(parse(text= paste0(Rds_name, "@meta.data")))[celltypes == ct, ])]
+	  if(!length(assay_hit)){
+	    CT_cluster <- RNAcounts[, rownames(eval(parse(text= paste0(Rds_name, "@meta.data")))[celltypes == ct, ])]
+		}
+    CT_cluster <- RNAcounts[, celltypes == ct]
   }else{
     CT_cluster <- csv_data[, csv_cells[csv_cells[, 2] == ct, 1]]
   }
 
+  print("whew")
   if(length(k_hit)){
     k <- as.integer(arg_tokens[k_hit + 1])
   }else{
@@ -93,10 +123,22 @@ for(ct in cell_types){
       else{
         clusters[[ct]] <- clara(t(as.matrix(CT_cluster)), k, metric = "euclidean", stand = FALSE, samples= 30, pamLike = FALSE)
       }
+			RNA_metacell_umap_ct <- NULL
+			for(i in unique(clusters[[ct]]$clustering)){
+				data_subset <- RNA_umap[which(clusters[[ct]]$clustering == i), ];
+				if(is.null(dim(data_subset))){
+					RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, data_subset);
+				}else{
+					RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, colMeans(data_subset))
+				}
+			}
+			rownames(RNA_metacell_umap_ct) <- paste(ct, seq(nrow(RNA_metacell_umap_ct)), sep= "_")
+			cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
       print(paste("Done clustering", ct))
+			RNA_metacell_umap <- rbind(RNA_metacell_umap, RNA_metacell_umap_ct)
     }
   }else if(summary_method == "kmeans"){
-    if(length(k) >0 && k > 3){
+    if(length(k) > 0 && k > 3){
       print(dim(CT_cluster))
       if(class(CT_cluster) == "numeric"){
         next;
@@ -144,6 +186,14 @@ for(i in seq(length(clusters)))
 colnames(mat) <- mc_names
 
 dir.create(output_file)
+if(length(assay_hit)){
+	kk <- 5L
+	knn_res <- class::knn(train= RNA_metacell_umap, test= ATAC_umap, cl= rownames(RNA_metacell_umap), k= kk)
+	atac2metacell_info <- data.frame(barcode= rownames(ATAC_umap), metacell= knn_res)
+	write.table(atac2metacell_info, paste0(output_file, "/ATAC_cell2metacell_info_", summary_method, ".txt"), row.names= F, quote= F, sep= "\t")
+}
+rna2metacell_info <- data.frame(barcode= rownames(RNA_umap), metacell= cell2metacell_info)
+write.table(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".txt"), row.names= F, quote= F, sep= "\t")
 write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
 save(clusters, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
 print("Done!")
