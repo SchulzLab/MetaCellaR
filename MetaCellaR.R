@@ -155,6 +155,7 @@ for(ct in cell_types){
 #load("clusters_heart_debug.Rdata")
 
 mat <- NULL
+mat_sum <- NULL
 for(i in seq(length(clusters))){
   if(summary_method == "kmed"){
     mat <- cbind(mat, t(clusters[[i]]$medoids))
@@ -163,15 +164,19 @@ for(i in seq(length(clusters))){
   }
   else{##kmed_means
     temp_cl <- NULL
+    temp_cl_sum <- NULL
     for(clst in unique(clusters[[i]]$clustering)){
       if(class(clusters[[i]]$data[clusters[[i]]$cluster == clst, ]) == "numeric"){
         temp_cl <- rbind(temp_cl, clusters[[i]]$data[clusters[[i]]$cluster == clst, ])
+        temp_cl_sum <- rbind(temp_cl_sum, clusters[[i]]$data[clusters[[i]]$cluster == clst, ])
       }
       else{
         temp_cl <- rbind(temp_cl, apply(clusters[[i]]$data[clusters[[i]]$cluster == clst, ], 2, FUN= mean))
+        temp_cl_sum <- rbind(temp_cl_sum, apply(clusters[[i]]$data[clusters[[i]]$cluster == clst, ], 2, FUN= sum))
       }
     }
     mat <- cbind(mat, t(temp_cl))
+    mat_sum <- cbind(mat_sum, t(temp_cl_sum))
   }
 }
 
@@ -184,6 +189,7 @@ for(i in seq(length(clusters)))
     mc_names <- c(mc_names, paste(names(clusters)[i], seq(nrow(clusters[[i]]$centers)), sep= "_"))
   }
 colnames(mat) <- mc_names
+colnames(mat_sum) <- mc_names
 
 dir.create(output_file)
 if(length(assay_hit)){
@@ -195,7 +201,17 @@ if(length(assay_hit)){
 rna2metacell_info <- data.frame(barcode= rownames(RNA_umap), metacell= cell2metacell_info)
 write.table(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".txt"), row.names= F, quote= F, sep= "\t")
 write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
-save(clusters, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
+write.csv(mat_sum, paste0(output_file, "/cellSummarized_", summary_method, "_sum.csv"))
+save(clusters, RNA_metacell_umap, ATAC_umap, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
+
+uniq_mc <- unique(atac2metacell_info$metacell)
+atac_metacell <- NULL;
+for(i in seq(length(uniq_mc))){
+	hits <- atac2metacell_info$barcode[which(atac2metacell_info$metacell == uniq_mc[i])];
+	atac_metacell <- cbind(atac_metacell, rowMeans(as.matrix(ATACcounts[, hits])))
+}
+colnames(atac_metacell) <- uniq_mc
+write.csv(atac_metacell, paste0(output_file, "/cellSummarized_ATAC_", summary_method, ".csv"))
 print("Done!")
 Rtnse_plot <- F
 if(Rtnse_plot){
