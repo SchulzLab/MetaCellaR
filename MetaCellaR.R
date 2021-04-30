@@ -70,13 +70,15 @@ if(!csv_flag){
 	  assays <- eval(parse(text= paste0(Rds_name, "@", assay_expression)))
 
 	  rna_hits <- which(tolower(assays) == "scrna-seq" | tolower(assays) == "scrna" | tolower(assays) == "scrna" | tolower(assays) == "rna")
-	  RNAcounts <- RNAcounts[, rna_hits]
 	  ATACcounts <- RNAcounts[, -rna_hits]
+	  RNAcounts <- RNAcounts[, rna_hits]
 
 	  RNA_celltypes <- celltypes[rna_hits]
 	  ATAC_celltypes <- celltypes[-rna_hits]
 		RNA_umap <- Sub[["umap"]]@cell.embeddings[rna_hits, ]
 		ATAC_umap <- Sub[["umap"]]@cell.embeddings[-rna_hits, ]
+print("ATAC_umap")
+print(head(ATAC_umap))
 	  celltypes <- RNA_celltypes
 	  cell_types <- unique(celltypes)
   }
@@ -202,13 +204,13 @@ rna2metacell_info <- data.frame(barcode= rownames(RNA_umap), metacell= cell2meta
 write.table(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".txt"), row.names= F, quote= F, sep= "\t")
 write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
 write.csv(mat_sum, paste0(output_file, "/cellSummarized_", summary_method, "_sum.csv"))
-save(clusters, RNA_metacell_umap, ATAC_umap, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
+save(atac2metacell_info, ATACcounts, clusters, RNA_metacell_umap, ATAC_umap, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
 
 uniq_mc <- unique(atac2metacell_info$metacell)
 atac_metacell <- NULL;
 for(i in seq(length(uniq_mc))){
 	hits <- atac2metacell_info$barcode[which(atac2metacell_info$metacell == uniq_mc[i])];
-	atac_metacell <- cbind(atac_metacell, rowMeans(as.matrix(ATACcounts[, hits])))
+	atac_metacell <- cbind(atac_metacell, rowMeans(as.matrix(ATACcounts)[, hits]))
 }
 colnames(atac_metacell) <- uniq_mc
 write.csv(atac_metacell, paste0(output_file, "/cellSummarized_ATAC_", summary_method, ".csv"))
