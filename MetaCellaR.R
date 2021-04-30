@@ -210,7 +210,11 @@ uniq_mc <- unique(atac2metacell_info$metacell)
 atac_metacell <- NULL;
 for(i in seq(length(uniq_mc))){
 	hits <- atac2metacell_info$barcode[which(atac2metacell_info$metacell == uniq_mc[i])];
-	atac_metacell <- cbind(atac_metacell, rowMeans(as.matrix(ATACcounts)[, hits]))
+	if(length(hits) > 1){
+		atac_metacell <- cbind(atac_metacell, rowMeans(as.matrix(ATACcounts)[, hits]))
+	}else{
+		atac_metacell <- cbind(atac_metacell, as.matrix(ATACcounts)[, hits])
+	}
 }
 colnames(atac_metacell) <- uniq_mc
 write.csv(atac_metacell, paste0(output_file, "/cellSummarized_ATAC_", summary_method, ".csv"))
