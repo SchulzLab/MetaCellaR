@@ -96,10 +96,17 @@ if(umap_flag){
 	print("Computing UMAP")
 	ptm <- proc.time()
 	if(csv_flag){
-		umap_res <- umap::umap(t(csv_data), n_components= 20)
+		pca_res <- prcomp(csv_data)
+		#umap_res <- umap::umap(t(csv_data), n_components= 20)
+		umap_res <- umap::umap(pca_res$rotation, n_components= 20)
 		celltypes <- csv_cells[, 2]
 	}else{
-		umap_res <- umap::umap(t(as.matrix(RNAcounts)), n_components= 20)
+print("Running PCA")
+		pca_res <- prcomp(RNAcounts)
+print("Done running PCA")
+print(paste("PCA computation time:", (proc.time() - ptm)))
+		#umap_res <- umap::umap(t(as.matrix(RNAcounts)), n_components= 20)
+		umap_res <- umap::umap(pca_res$rotation, n_components= 20)
 	}
 	print(paste("UMAP computation time:", (proc.time() - ptm)))
 	umap_layout <- umap_res$layout
