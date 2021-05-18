@@ -16,7 +16,7 @@ csv_flag <- F
 ########################
 ## Parse arguments
 argsexpr <- commandArgs(trailingOnly= T)
-defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay")
+defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
 RNA_hit <- which(arg_tokens == defined_args[2])
@@ -24,6 +24,12 @@ celltype_hit <- which(arg_tokens == defined_args[3])
 output_hit <- which(arg_tokens == defined_args[4])
 k_hit <- which(arg_tokens == defined_args[5])
 assay_hit <- which(arg_tokens == defined_args[6])
+umap_hit <- which(arg_tokens == defined_args[7])
+if(length(umap_hit)){
+	umap_flag <- as.logical(arg_tokens[umap_hit + 1])
+}else{
+	umap_flag <- F
+}
 if(length(file_hit)){
   if(length(RNA_hit) && length(celltype_hit)){
     file_name <- arg_tokens[file_hit + 1]
@@ -39,6 +45,7 @@ if(length(file_hit)){
     csv_flag <- T
     csv_data <- read.csv(arg_tokens[file_hit + 1], row.names= 1)
     csv_cells <- read.table(arg_tokens[celltype_hit + 1], header= T)
+		general_data <- csv_data
     print("Done!")
   }
 }else{
@@ -72,7 +79,7 @@ if(!csv_flag){
 	  rna_hits <- which(tolower(assays) == "scrna-seq" | tolower(assays) == "scrna" | tolower(assays) == "scrna" | tolower(assays) == "rna")
 	  ATACcounts <- RNAcounts[, -rna_hits]
 	  RNAcounts <- RNAcounts[, rna_hits]
-
+		general_data <- RNAcounts
 	  RNA_celltypes <- celltypes[rna_hits]
 	  ATAC_celltypes <- celltypes[-rna_hits]
 		RNA_umap <- Sub[["umap"]]@cell.embeddings[rna_hits, ]
@@ -85,11 +92,25 @@ print(head(ATAC_umap))
 }else{
   cell_types <- unique(csv_cells[, 2])
 }
+if(umap_flag){
+	print("Computing UMAP")
+	ptm <- proc.time()
+	if(csv_flag){
+		umap_res <- umap::umap(t(csv_data), n_components= 20)
+		celltypes <- csv_cells[, 2]
+	}else{
+		umap_res <- umap::umap(t(as.matrix(RNAcounts)), n_components= 20)
+	}
+	print(paste("UMAP computation time:", (proc.time() - ptm)))
+	umap_layout <- umap_res$layout
+}
 clusters <- list()
 all_mediods <- list()
 RNA_metacell_umap <- NULL
 cell2metacell_info <- NULL
+cluster_data <- list()
 print(dim(RNAcounts))
+
 for(ct in cell_types){
   print(ct)
   if(!csv_flag){
@@ -100,8 +121,11 @@ for(ct in cell_types){
   }else{
     CT_cluster <- csv_data[, csv_cells[csv_cells[, 2] == ct, 1]]
   }
-
-  print("whew")
+	if(umap_flag){
+		CT_cluster <- t(umap_layout[celltypes == ct, ]) # I need to transform it bcuz the data gets transformed in the clara call
+	}
+	original_CT_cluster <- CT_cluster
+  print(c("dim(CT_cluster):", dim(CT_cluster)))
   if(length(k_hit)){
     k <- as.integer(arg_tokens[k_hit + 1])
   }else{
@@ -112,6 +136,7 @@ for(ct in cell_types){
     print(paste("k=", k, "ncol(CT_cluster)=", ncol(CT_cluster)))
     if(length(k) >0 && k > 3 && k < ncol(CT_cluster)){
       class(CT_cluster)
+			cluster_data[[ct]] <- t(as.matrix(original_CT_cluster))
       if(iter_flag){
         for(iter in seq(10)){
           clara_res <- clara(t(as.matrix(CT_cluster)), k, metric = "euclidean", stand = FALSE, samples= 30, pamLike = FALSE)
@@ -152,10 +177,11 @@ for(ct in cell_types){
     error("Undefined method of summarization. Please pick either kmed or kmeans!")
   }
 }
-#save(clusters, file= "clusters_heart_debug.Rdata")
+save(cluster_data, clusters, file= paste0(output_file, "_clusters_heart_debug.Rdata"))
 
 #load("clusters_heart_debug.Rdata")
 
+print("Done clustering!")
 mat <- NULL
 mat_sum <- NULL
 for(i in seq(length(clusters))){
@@ -167,21 +193,36 @@ for(i in seq(length(clusters))){
   else{##kmed_means
     temp_cl <- NULL
     temp_cl_sum <- NULL
-    for(clst in unique(clusters[[i]]$clustering)){
-      if(class(clusters[[i]]$data[clusters[[i]]$cluster == clst, ]) == "numeric"){
-        temp_cl <- rbind(temp_cl, clusters[[i]]$data[clusters[[i]]$cluster == clst, ])
-        temp_cl_sum <- rbind(temp_cl_sum, clusters[[i]]$data[clusters[[i]]$cluster == clst, ])
-      }
-      else{
-        temp_cl <- rbind(temp_cl, apply(clusters[[i]]$data[clusters[[i]]$cluster == clst, ], 2, FUN= mean))
-        temp_cl_sum <- rbind(temp_cl_sum, apply(clusters[[i]]$data[clusters[[i]]$cluster == clst, ], 2, FUN= sum))
-      }
-    }
+		if(umap_flag){
+			for(clst in unique(clusters[[i]]$clustering)){
+				if(class(cluster_data[[i]][clusters[[i]]$cluster == clst, ]) == "numeric"){
+					temp_cl <- rbind(temp_cl, cluster_data[[i]][clusters[[i]]$cluster == clst, ])
+					temp_cl_sum <- rbind(temp_cl_sum, cluster_data[[i]][clusters[[i]]$cluster == clst, ])
+				}else{
+					temp_cl <- rbind(temp_cl, apply(cluster_data[[i]][clusters[[i]]$cluster == clst, ], 2, FUN= mean))
+					temp_cl_sum <- rbind(temp_cl_sum, apply(cluster_data[[i]][clusters[[i]]$cluster == clst, ], 2, FUN= sum))
+				}
+			}
+		}else{
+    	for(clst in unique(clusters[[i]]$clustering)){
+      	if(class(clusters[[i]]$data[clusters[[i]]$cluster == clst, ]) == "numeric"){
+        	temp_cl <- rbind(temp_cl, clusters[[i]]$data[clusters[[i]]$cluster == clst, ])
+        	temp_cl_sum <- rbind(temp_cl_sum, clusters[[i]]$data[clusters[[i]]$cluster == clst, ])
+      	}
+      	else{
+        	temp_cl <- rbind(temp_cl, apply(clusters[[i]]$data[clusters[[i]]$cluster == clst, ], 2, FUN= mean))
+        	temp_cl_sum <- rbind(temp_cl_sum, apply(clusters[[i]]$data[clusters[[i]]$cluster == clst, ], 2, FUN= sum))
+      	}
+    	}
+		}
+		print(dim(temp_cl))
+		print(dim(temp_cl_sum))
     mat <- cbind(mat, t(temp_cl))
     mat_sum <- cbind(mat_sum, t(temp_cl_sum))
   }
 }
 
+print("done making mat")
 
 mc_names <- NULL;
 for(i in seq(length(clusters)))
@@ -193,6 +234,7 @@ for(i in seq(length(clusters)))
 colnames(mat) <- mc_names
 colnames(mat_sum) <- mc_names
 
+print("creating directory!")
 dir.create(output_file)
 if(length(assay_hit)){
 	kk <- 5L
@@ -218,6 +260,15 @@ for(i in seq(length(uniq_mc))){
 }
 colnames(atac_metacell) <- uniq_mc
 write.csv(atac_metacell, paste0(output_file, "/cellSummarized_ATAC_", summary_method, ".csv"))
+
+final_umap_res <- umap::umap(t(mat))
+
+celltypes <- sapply(colnames(mat), function(i) strsplit(i, "_")[[1]][1])
+df <- data.frame(UMAP1= final_umap_res$layout[, 1], UMAP2= final_umap_res$layout[, 2], celltype= celltypes)
+library(ggplot2)
+pdf(paste0(output_file, "/umap_", summary_method, ".pdf"))
+ggplot(df, aes(x= UMAP1, y= UMAP2)) + geom_point(aes(color= celltype)) + theme_classic() + geom_text(aes(label= celltype),hjust=0, vjust=0, size= 3, check_overlap = T)
+dev.off()
 print("Done!")
 Rtnse_plot <- F
 if(Rtnse_plot){
