@@ -5,6 +5,7 @@
 set.seed(0)
 library(cluster)
 library(knn.covertree)
+library(irlba)
 ########################
 summary_method <- "kmed_means" #kmed
 iter_flag <- F
@@ -96,20 +97,32 @@ if(umap_flag){
 	print("Computing UMAP")
 	ptm <- proc.time()
 	if(csv_flag){
-		pca_res <- prcomp(csv_data)
+		## Florian's way ##
+		#pca_res <- prcomp_irlba(csv_data, n= 30, scale.= T)
 		#umap_res <- umap::umap(t(csv_data), n_components= 20)
-		umap_res <- umap::umap(pca_res$rotation, n_components= 20)
+		#umap_res <- umap::umap(pca_res$rotation, n_components= 20, n_threads= 10)
+		##Seurat way###
+    ptm_umap <- proc.time(); 
+    umap_layout <- uwot::umap(t(as.matrix(csv_data)), pca= 30, pca_center= T, n_components= 20)
+		print(paste("UMAP computation time:", proc.time() - ptm_umap))
 		celltypes <- csv_cells[, 2]
 	}else{
-print("Running PCA")
-		pca_res <- prcomp(RNAcounts)
-print("Done running PCA")
-print(paste("PCA computation time:", (proc.time() - ptm)))
+		## Florian's way ##
+		#print("Running PCA")
+		#pca_res <- prcomp_irlba(RNAcounts, n=30, scale.= T)
+		#print("Done running PCA")
+		#print(paste("PCA computation time:", (proc.time() - ptm)))
 		#umap_res <- umap::umap(t(as.matrix(RNAcounts)), n_components= 20)
-		umap_res <- umap::umap(pca_res$rotation, n_components= 20)
+		#ptm2 <- proc.time()
+		#print("Starting UMAP calculation...")
+		#umap_res <- umap::umap(pca_res$rotation, n_components= 20, n_threads= 10)
+		#print("UMAP calculation done!")
+		#print(paste("UMAP computation time:", (proc.time() - ptm)))
+		##Seurat way###
+		ptm_umap <- proc.time();
+		umap_layout <- uwot::umap(t(as.matrix(RNAcounts)), pca= 30, pca_center= T, n_components= 20)
+		print(paste("UMAP computation time:", proc.time() - ptm_umap))
 	}
-	print(paste("UMAP computation time:", (proc.time() - ptm)))
-	umap_layout <- umap_res$layout
 }
 clusters <- list()
 all_mediods <- list()
