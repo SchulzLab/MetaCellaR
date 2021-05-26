@@ -260,10 +260,10 @@ if(length(assay_hit)){
 	kk <- 5L
 	knn_res <- class::knn(train= RNA_metacell_umap, test= ATAC_umap, cl= rownames(RNA_metacell_umap), k= kk)
 	atac2metacell_info <- data.frame(barcode= rownames(ATAC_umap), metacell= knn_res)
-	write.csv(atac2metacell_info, paste0(output_file, "/ATAC_cell2metacell_info_", summary_method, ".txt"), row.names= F)
+	write.csv(atac2metacell_info, paste0(output_file, "/ATAC_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 }
 rna2metacell_info <- data.frame(barcode= rownames(RNA_umap), metacell= cell2metacell_info)
-write.csv(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".txt"), row.names= F)
+write.csv(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
 write.csv(mat_sum, paste0(output_file, "/cellSummarized_", summary_method, "_sum.csv"))
 save(atac2metacell_info, ATACcounts, clusters, RNA_metacell_umap, ATAC_umap, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
