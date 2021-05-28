@@ -72,6 +72,7 @@ if(!csv_flag){
   print("Done loading the Seurat object")
   print("Done loading Rds!")
   RNAcounts <- eval(parse(text= paste0(Rds_name, "@", RNA_count_expression))) #Sub@assays$RNA@counts
+	RNAcounts <- as.matrix(RNAcounts)
   celltypes <- eval(parse(text= paste0(Rds_name, "@", celltype_expression)))
   cell_types <- unique(as.character(celltypes))
   if(length(assay_hit)){
