@@ -72,6 +72,7 @@ if(!csv_flag){
   print("Done loading the Seurat object")
   print("Done loading Rds!")
   RNAcounts <- eval(parse(text= paste0(Rds_name, "@", RNA_count_expression))) #Sub@assays$RNA@counts
+	gene_names <- rownames(RNAcounts)
 	RNAcounts <- as.matrix(RNAcounts)
   celltypes <- eval(parse(text= paste0(Rds_name, "@", celltype_expression)))
   cell_types <- unique(as.character(celltypes))
@@ -142,10 +143,11 @@ for(ct in cell_types){
   }else{
     CT_cluster <- csv_data[, csv_cells[csv_cells[, 2] == ct, 1]]
   }
+	original_CT_cluster <- CT_cluster
 	if(umap_flag){
 		CT_cluster <- t(umap_layout[celltypes == ct, ]) # I need to transform it bcuz the data gets transformed in the clara call
+		original_CT_cluster <- RNAcounts[, celltypes == ct]
 	}
-	original_CT_cluster <- CT_cluster
   print(c("dim(CT_cluster):", dim(CT_cluster)))
   if(length(k_hit)){
     k <- as.integer(arg_tokens[k_hit + 1])
