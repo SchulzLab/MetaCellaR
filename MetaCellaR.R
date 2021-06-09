@@ -17,6 +17,7 @@ csv_flag <- F
 ########################
 ## Parse arguments
 argsexpr <- commandArgs(trailingOnly= T)
+#argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005")
 defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
@@ -172,21 +173,24 @@ for(ct in cell_types){
       }
       else{
         clusters[[ct]] <- clara(t(as.matrix(CT_cluster)), k, metric = "euclidean", stand = FALSE, samples= 30, pamLike = FALSE)
+				cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
       }
-			RNA_metacell_umap_ct <- NULL
-			for(i in unique(clusters[[ct]]$clustering)){
-				data_subset <- RNA_umap[which(clusters[[ct]]$clustering == i), ];
-				if(is.null(dim(data_subset))){
-					RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, data_subset);
-				}else{
-					RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, colMeans(data_subset))
+			if(length(assay_hit)){
+				RNA_metacell_umap_ct <- NULL
+				for(i in unique(clusters[[ct]]$clustering)){
+					data_subset <- RNA_umap[which(clusters[[ct]]$clustering == i), ];
+					if(is.null(dim(data_subset))){
+						RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, data_subset);
+					}else{
+						RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, colMeans(data_subset))
+					}
 				}
+				rownames(RNA_metacell_umap_ct) <- paste(ct, seq(nrow(RNA_metacell_umap_ct)), sep= "_")
+				cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
+				print(paste("Done clustering", ct))
+				RNA_metacell_umap <- rbind(RNA_metacell_umap, RNA_metacell_umap_ct)
 			}
-			rownames(RNA_metacell_umap_ct) <- paste(ct, seq(nrow(RNA_metacell_umap_ct)), sep= "_")
-			cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
-      print(paste("Done clustering", ct))
-			RNA_metacell_umap <- rbind(RNA_metacell_umap, RNA_metacell_umap_ct)
-    }
+		}
   }else if(summary_method == "kmeans"){
     if(length(k) > 0 && k > 3){
       print(dim(CT_cluster))
@@ -194,6 +198,7 @@ for(ct in cell_types){
         next;
       }
       clusters[[ct]] <- kmeans(t(as.matrix(CT_cluster)), k)
+			cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
     }
   }
   else{
@@ -264,26 +269,27 @@ if(length(assay_hit)){
 	knn_res <- class::knn(train= RNA_metacell_umap, test= ATAC_umap, cl= rownames(RNA_metacell_umap), k= kk)
 	atac2metacell_info <- data.frame(barcode= rownames(ATAC_umap), metacell= knn_res)
 	write.csv(atac2metacell_info, paste0(output_file, "/ATAC_cell2metacell_info_", summary_method, ".csv"), row.names= F)
+	rna2metacell_info <- data.frame(barcode= rownames(RNA_umap), metacell= cell2metacell_info)
+	write.csv(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 }
-rna2metacell_info <- data.frame(barcode= rownames(RNA_umap), metacell= cell2metacell_info)
-write.csv(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
 write.csv(mat_sum, paste0(output_file, "/cellSummarized_", summary_method, "_sum.csv"))
-save(atac2metacell_info, ATACcounts, clusters, RNA_metacell_umap, ATAC_umap, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
+if(length(assay_hit)){
+	save(atac2metacell_info, ATACcounts, clusters, RNA_metacell_umap, ATAC_umap, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
 
-uniq_mc <- unique(atac2metacell_info$metacell)
-atac_metacell <- NULL;
-for(i in seq(length(uniq_mc))){
-	hits <- atac2metacell_info$barcode[which(atac2metacell_info$metacell == uniq_mc[i])];
-	if(length(hits) > 1){
-		atac_metacell <- cbind(atac_metacell, rowMeans(as.matrix(ATACcounts)[, hits]))
-	}else{
-		atac_metacell <- cbind(atac_metacell, as.matrix(ATACcounts)[, hits])
+	uniq_mc <- unique(atac2metacell_info$metacell)
+	atac_metacell <- NULL;
+	for(i in seq(length(uniq_mc))){
+		hits <- atac2metacell_info$barcode[which(atac2metacell_info$metacell == uniq_mc[i])];
+		if(length(hits) > 1){
+			atac_metacell <- cbind(atac_metacell, rowMeans(as.matrix(ATACcounts)[, hits]))
+		}else{
+			atac_metacell <- cbind(atac_metacell, as.matrix(ATACcounts)[, hits])
+		}
 	}
+	colnames(atac_metacell) <- uniq_mc
+	write.csv(atac_metacell, paste0(output_file, "/cellSummarized_ATAC_", summary_method, ".csv"))
 }
-colnames(atac_metacell) <- uniq_mc
-write.csv(atac_metacell, paste0(output_file, "/cellSummarized_ATAC_", summary_method, ".csv"))
-
 final_umap_res <- umap::umap(t(mat))
 
 celltypes <- sapply(colnames(mat), function(i) strsplit(i, "_")[[1]][1])
