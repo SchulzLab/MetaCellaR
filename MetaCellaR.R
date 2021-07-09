@@ -6,6 +6,10 @@ set.seed(0)
 library(cluster)
 library(knn.covertree)
 library(irlba)
+library(data.table)
+library(ggplot2)
+library(ggdendro)
+library(cowplot)
 ########################
 summary_method <- "kmed_means" #kmed
 iter_flag <- F
@@ -16,8 +20,13 @@ csv_flag <- F
 #celltype_expression <- args[3]
 ########################
 ## Parse arguments
+
 argsexpr <- commandArgs(trailingOnly= T)
-#argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005")
+#argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005", "-umap T")
+#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized", "-umap T", "-assay meta.data$datasets2")
+merge_flag <- T
+#-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
+
 defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
@@ -72,10 +81,16 @@ if(!csv_flag){
   }
   print("Done loading the Seurat object")
   print("Done loading Rds!")
+  celltypes <- eval(parse(text= paste0(Rds_name, "@", celltype_expression)))
+	## Identify NA cell annotation and remove them from the object
+	na_idx <- is.na(celltypes)
+	if(sum(na_idx)){
+		## TODO:
+		Sub <- Sub[!na_idx, ]## I know that it doesn't work as I've already tested it on a Seurat obj... gotta find another way
+	}
   RNAcounts <- eval(parse(text= paste0(Rds_name, "@", RNA_count_expression))) #Sub@assays$RNA@counts
 	gene_names <- rownames(RNAcounts)
 	RNAcounts <- as.matrix(RNAcounts)
-  celltypes <- eval(parse(text= paste0(Rds_name, "@", celltype_expression)))
   cell_types <- unique(as.character(celltypes))
   if(length(assay_hit)){
 	  assays <- eval(parse(text= paste0(Rds_name, "@", assay_expression)))
@@ -88,8 +103,8 @@ if(!csv_flag){
 	  ATAC_celltypes <- celltypes[-rna_hits]
 		RNA_umap <- Sub[["umap"]]@cell.embeddings[rna_hits, ]
 		ATAC_umap <- Sub[["umap"]]@cell.embeddings[-rna_hits, ]
-print("ATAC_umap")
-print(head(ATAC_umap))
+		print("ATAC_umap")
+		print(head(ATAC_umap))
 	  celltypes <- RNA_celltypes
 	  cell_types <- unique(celltypes)
   }
@@ -134,6 +149,154 @@ cell2metacell_info <- NULL
 cluster_data <- list()
 print(dim(RNAcounts))
 
+####### Begin functions #######
+################################
+
+invoke_clara <- function(CT_cluster, original_CT_cluster, iter_flag, clusters, RNA_metacell_umap, ct, k){
+	class(CT_cluster)
+	if(iter_flag){
+		for(iter in seq(10)){
+			clara_res <- clara(t(as.matrix(CT_cluster)), k, metric = "euclidean", stand = FALSE, samples= 30, pamLike = FALSE)
+			dim(clara_res$medoids)
+			dim(CT_cluster)
+
+			clusters[[ct]] <- clara_res
+			all_mediods[[ct]] <- rbind(all_mediods[[ct]], clara_res$medoids)
+		}
+	}
+	else{
+		clusters[[ct]] <- clara(t(as.matrix(CT_cluster)), k, metric = "euclidean", stand = FALSE, samples= 30, pamLike = FALSE)
+	}
+	if(length(assay_hit)){
+		RNA_metacell_umap_ct <- NULL
+		for(i in unique(clusters[[ct]]$clustering)){
+			data_subset <- RNA_umap[which(clusters[[ct]]$clustering == i), ];
+			if(is.null(dim(data_subset))){
+				RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, data_subset);
+			}else{
+				RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, colMeans(data_subset))
+			}
+		}
+		rownames(RNA_metacell_umap_ct) <- paste(ct, seq(nrow(RNA_metacell_umap_ct)), sep= "_")
+		print(paste("Done clustering", ct))
+		RNA_metacell_umap <- rbind(RNA_metacell_umap, RNA_metacell_umap_ct)
+	}
+	#return(list(clusters= clusters, RNA_metacell_umap= RNA_metacell_umap))
+	return(clusters= clusters)
+}
+
+#####
+
+invoke_clara_simplified <- function(CT_cluster, k){
+	class(CT_cluster)
+	cluster_data <- t(as.matrix(CT_cluster))
+	clusters <- clara(t(as.matrix(CT_cluster)), k, metric = "euclidean", stand = FALSE, samples= 30, pamLike = FALSE)
+	return(list(clusters= clusters))
+}
+######
+get_k_grid <- function(ncells, expected_cells){
+	mid_k <- floor(ncells / expected_cells)
+	k <- seq(floor(mid_k * .75), mid_k * 1.5, by= 2)
+	## If k is an even number, make them odd:
+	if(k[1] %% 2 == 0){
+		k <- k + 1
+	}
+	return(k)
+}
+
+metacell_density <- function(clara_out, k_search){
+	densities <- NULL
+	for(i in seq(ncol(clara_out))){
+		expected_cell_num <- length(clara_out[1, 1][[1]][[1]]$clustering) / k_search[i]
+		metacell_counts <- table(clara_out[1, i][[1]][[1]]$clustering)
+		densities <- c(densities, sum(metacell_counts > expected_cell_num) / length(unique(clara_out[1, i][[1]][[1]]$clustering)))
+	}
+	return(densities)
+}
+
+########
+metacell_density1 <- function(clara_out, k_search){
+	densities <- NULL
+	for(i in seq(length(k_search))){
+		expected_cell_num <- length(clara_out[[i]]$clustering) / k_search[i]
+		metacell_counts <- table(clara_out[[i]]$clustering)
+		#densities <- c(densities, sum(metacell_counts > expected_cell_num) / length(unique(clara_out[[i]]$clustering)))
+		densities <- c(densities, sum(metacell_counts > expected_cell_num))
+	}
+	return(densities)
+}
+########
+
+metacell_quality <- function(clara_out, expected_cell_num= 30, slack_ratio= .15){
+	cell_num_slack <- expected_cell_num - floor(expected_cell_num * slack_ratio)
+	metacell_counts <- table(clara_out$clustering)
+	qualities <- metacell_counts > cell_num_slack
+	return(qualities)
+}
+
+get_outliers <- function(clara_out, outlier_cell_num= 10){
+	metacell_counts <- table(clara_out$clustering)
+	return(which(metacell_counts < outlier_cell_num))
+}
+
+########
+cluster_means <- function(clusters){
+	temp_cl <- NULL
+	for(clst in unique(clusters$clustering)){
+		if("numeric" %in% class(clusters$data[clusters$cluster == clst, ])){
+			temp_cl <- rbind(temp_cl, clusters$data[clusters$cluster == clst, ])
+		}
+		else{
+			temp_cl <- rbind(temp_cl, apply(clusters$data[clusters$cluster == clst, ], 2, FUN= mean))
+		}
+	}
+	return(temp_cl)
+}
+########
+merge_small_mc <- function(clustering, thresh= 30){
+	flag <- T
+	while(flag){
+		metacell_counts <- table(clustering)
+		mc_table_sorted <- sort(metacell_counts)
+		low_mc_idx <- which(metacell_counts < thresh)
+		idx <- order(metacell_counts[low_mc_idx], decreasing= F)
+		new_mc <- NULL;
+		mc_sum <- metacell_counts[low_mc_idx[idx][1]]
+		new_mc <- names(metacell_counts[low_mc_idx[idx][1]])
+		max_cluster_id <- max(clustering) + 1
+		pointer <- 2
+		while(mc_sum < thresh){
+			if(length(idx) == 1){
+				all_idx <- order(metacell_counts, decreasing= F)
+				new_mc <- c(new_mc, names(metacell_counts[all_idx][2]))
+				clustering[which(clustering %in% as.numeric(new_mc))] <- max_cluster_id
+				flag <- F
+				break;
+			}
+			mc_sum <- mc_sum + metacell_counts[low_mc_idx[idx][pointer]]
+			new_mc <- c(new_mc, names(metacell_counts[low_mc_idx[idx][pointer]]))
+			pointer <- pointer + 1
+		}
+		clustering[which(clustering %in% as.numeric(new_mc))] <- max_cluster_id
+		if(length(which(table(clustering) < thresh)) == 0){
+			flag <- F
+		}
+	}
+	return(clustering)
+}
+########
+####### End of functions #######
+################################
+## run with another dataset
+## catalogue the first and second pass
+## optimize with 30 or different slack and see if it makes sense to do the second pass
+mc_quality_info <- list()
+mc_outlier_info <- list()
+mc_distr <- list()
+ks_info <- list()
+library(pheatmap)
+pdf(paste0(output_file, "_mc_dendrogram.pdf"))
+#pdf(paste0(output_file, "_cluster_pass_pheatmap.pdf"))
 for(ct in cell_types){
   print(ct)
   if(!csv_flag){
@@ -158,23 +321,73 @@ for(ct in cell_types){
   }
   if(summary_method == "kmed" || summary_method == "kmed_means"){
     print(paste("k=", k, "ncol(CT_cluster)=", ncol(CT_cluster)))
-    if(length(k) >0 && k > 3 && k < ncol(CT_cluster)){
-      class(CT_cluster)
-			cluster_data[[ct]] <- t(as.matrix(original_CT_cluster))
-      if(iter_flag){
-        for(iter in seq(10)){
-          clara_res <- clara(t(as.matrix(CT_cluster)), k, metric = "euclidean", stand = FALSE, samples= 30, pamLike = FALSE)
-          dim(clara_res$medoids)
-          dim(CT_cluster)
+	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
+	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
+	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
+		if(k >= ncol(CT_cluster)){
+			print("too small... gotta merge all cells into one metacell")
+			### merge all cells into one metacell
+		}else if(length(k) >0 && k > 3 && k < ncol(CT_cluster)){
+			library(parallel)
+			#clust <- makeCluster(ceiling(detectCores()/2))
+			pass_num <- 1
+			pass_max <- 1 #3
+			while(pass_num <= pass_max){
+				#clara_out <- invoke_clara(CT_cluster, original_CT_cluster, iter_flag, clusters, RNA_metacell_umap, ct, k)
+				clara_out <- invoke_clara_simplified(CT_cluster, k)
+				mc_qual <- metacell_quality(clara_out$clusters, expected_cell_num= 30, slack_ratio= .15)
+				#outlier_idx <- which(as.character(clara_out$clustering) %in% names(mc_qual[which(mc_qual == F)]))
+				outlier_idx <- get_outliers(clara_out$clusters, 10)
+				print(c("Pass:", pass_num, "valid metacells:", length(which(mc_qual == T)), "outliers:", length(outlier_idx)))
+				mc_quality_info[[ct]][[pass_num]] <- length(which(mc_qual == T))
+				mc_outlier_info[[ct]][[pass_num]] <- length(outlier_idx)
+				mc_distr[[ct]][[pass_num]] <- clara_out$clusters$clustering
+				## Plot heatmap
+				ann_col <- data.frame(metacells= factor(clara_out$clusters$clustering))
+				rownames(ann_col) <- seq(ncol((CT_cluster)))
+				colnames(CT_cluster) <- seq(ncol((CT_cluster)))
+				#pheatmap(CT_cluster, annotation_col= ann_col, fontsize= 6, show_colnames= F, main= paste(ct, pass_num))
+				###############
+				cluster_data[[ct]] <- t(as.matrix(original_CT_cluster))
+				if(pass_max > 1){
+					if(length(outlier_idx)){
+						CT_cluster <- CT_cluster[, -outlier_idx]
+						cluster_data[[ct]] <- t(as.matrix(original_CT_cluster[, -outlier_idx]))
+					}else{
+						cluster_data[[ct]] <- t(as.matrix(original_CT_cluster))
+						pass_num <- pass_max
+					}
+				}
+				## plot the metacell count table with a dendrogram obtained from mean clusters
+				cluster_means_res <- cluster_means(clara_out$clusters)
+				hc_res <- hclust(d = dist(x = cluster_means_res))
+				df <- data.frame(table(clara_out$clusters$clustering));
+				df$y <- as.factor(rep(1, nrow(df)))
+				df_ordered <- df[hc_res$order, ]
+				df_ordered$Var1 <- factor(df_ordered$Var1, levels= df_ordered$Var1)
+				p1 <- ggplot(df_ordered, aes(y= Var1, x= y)) + geom_tile(show.legend= F, color= "gray", fill= "white") + theme_classic() + geom_text(aes(label= Freq), size= 1) + theme(axis.text = element_text(size = 3)) + theme(axis.text.y = element_text(size = rel(1), hjust = 1, angle = 0), 
+          # margin: top, right, bottom, and left ->  plot.margin = unit(c(1, 0.2, 0.2, -0.5), "cm"), 
+          panel.grid.minor = element_blank()) + ggtitle(ct)
+				p2 <- ggdendrogram(data = as.dendrogram(hc_res), rotate= T, segments= T, leaf_labels= F) + geom_text(size= 1)
+				print(plot_grid(p1, p2, rel_widths=c(.25, 1), ncol= 2))#align= "h"
+				## update k after removing outliars
+				ks_info[[ct]][[pass_num]] <- k
+				k <- floor(ncol(CT_cluster) / 30)
+				pass_num <- pass_num + 1
+			}
 
-          clusters[[ct]] <- clara_res
-          all_mediods[[ct]] <- rbind(all_mediods[[ct]], clara_res$medoids)
-        }
-      }
-      else{
-        clusters[[ct]] <- clara(t(as.matrix(CT_cluster)), k, metric = "euclidean", stand = FALSE, samples= 30, pamLike = FALSE)
-				cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
-      }
+			## Tried parallelization of the k_search, but it still was pretty slow and we decided to do one k (the heuristic one)
+			## and apply the outlier (metacells with few cells) removal, then cluster again as the second pass (k needs to be accordingly).
+			#k_search <- get_k_grid(ncol(CT_cluster), 30)
+			#clara_out <- mclapply(k_search, function(k){return(invoke_clara(CT_cluster, original_CT_cluster, iter_flag, clusters, RNA_metacell_umap, ct, k))}, mc.cores= min(ceiling(detectCores()/2), length(k_search)))
+
+			#density_res <- metacell_density(clara_out, k_search)
+
+			clusters[[ct]] <- clara_out$clusters
+			if(merge_flag){
+				clusters[[ct]]$clustering <- merge_small_mc(clusters[[ct]]$clustering)
+			}
+			print(table(clusters[[ct]]$clustering))
 			if(length(assay_hit)){
 				RNA_metacell_umap_ct <- NULL
 				for(i in unique(clusters[[ct]]$clustering)){
@@ -186,11 +399,14 @@ for(ct in cell_types){
 					}
 				}
 				rownames(RNA_metacell_umap_ct) <- paste(ct, seq(nrow(RNA_metacell_umap_ct)), sep= "_")
-				cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
 				print(paste("Done clustering", ct))
 				RNA_metacell_umap <- rbind(RNA_metacell_umap, RNA_metacell_umap_ct)
 			}
-		}
+			cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
+	}	
+	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
+	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
+	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
   }else if(summary_method == "kmeans"){
     if(length(k) > 0 && k > 3){
       print(dim(CT_cluster))
@@ -202,12 +418,41 @@ for(ct in cell_types){
     }
   }
   else{
-    error("Undefined method of summarization. Please pick either kmed or kmeans!")
+    error("Undefined method of summarization. Please pick either kmed, kmeans, or kmed_means!")
   }
 }
-save(cluster_data, clusters, file= paste0(output_file, "_clusters_heart_debug.Rdata"))
+dev.off()
+save(ks_info, mc_distr, mc_quality_info, mc_outlier_info, cluster_data, clusters, file= paste0(output_file, "_clusters_heart_debug.Rdata"))
+if(pass_max > 1){
+	mc_qual <- as.data.table(sapply(seq(length(mc_quality_info)), function(i) unlist(mc_quality_info[[i]])))
+	colnames(mc_qual) <- names(mc_quality_info)
+	mc_qual[, pass := seq(1, 3)]
 
-#load("clusters_heart_debug.Rdata")
+	mc_outlier <- as.data.table(sapply(seq(length(mc_outlier_info)), function(i) unlist(mc_outlier_info[[i]])))
+	colnames(mc_outlier) <- names(mc_outlier_info)
+	mc_outlier[, pass := seq(1, 3)]
+
+
+	ks_dt <- as.data.table(sapply(seq(length(ks_info)), function(i) unlist(ks_info[[i]])))
+	colnames(ks_dt) <- names(ks_info)
+	ks_dt[, pass := seq(1, 3)]
+
+
+
+	dt <- NULL;
+	for(i in seq(length(mc_distr)))
+		for(j in seq(length(mc_distr[[i]]))){
+			dt <- rbind(dt, data.table(clusters= mc_distr[[i]][[j]], pass= as.character(j), celltype= names(mc_distr)[i]))
+		}
+
+	pdf(paste0(output_file, "_mc_qual_freq.pdf")); ggplot(melt(mc_qual, id.vars= "pass", variable.name= "cell_type", value.name= "quality"), aes(x= pass, y= quality)) + geom_point() + geom_line() + facet_wrap(~cell_type) + theme(axis.text.x= element_text(angle= 45)); ggplot(melt(mc_outlier, id.vars= "pass", variable.name= "cell_type", value.name= "outlier"), aes(x= pass, y= outlier)) + geom_point() + geom_line() + facet_wrap(~cell_type) + theme(axis.text.x= element_text(angle= 45));
+	ggplot(melt(ks_dt, id.vars= "pass", variable.name= "cell_type", value.name= "k"), aes(x= pass, y= k)) + geom_point() + geom_line() + facet_wrap(~cell_type, scales= "free") + theme(axis.text.x= element_text(angle= 45));
+#for(i in seq(length(unique(dt$celltype))))
+#ggplot(dt) + geom_histogram(aes(x= clusters, fill= pass)) + facet_wrap(~celltype, scales= "free");
+	dt$clusters <- factor(dt$clusters)
+	ggplot(dt) + geom_bar(astat = "identity", position = 'dodge', aes(x= clusters, fill= pass)) + geom_hline(yintercept= 10, linetype= "dashed", color= "black")+ facet_wrap(~celltype, scales= "free") + theme(axis.text.x= element_text(angle= 45, size= 3));
+	dev.off()
+}
 
 print("Done clustering!")
 mat <- NULL
@@ -223,23 +468,26 @@ for(i in seq(length(clusters))){
     temp_cl_sum <- NULL
 		if(umap_flag){
 			for(clst in unique(clusters[[i]]$clustering)){
-				if(class(cluster_data[[i]][clusters[[i]]$cluster == clst, ]) == "numeric"){
-					temp_cl <- rbind(temp_cl, cluster_data[[i]][clusters[[i]]$cluster == clst, ])
-					temp_cl_sum <- rbind(temp_cl_sum, cluster_data[[i]][clusters[[i]]$cluster == clst, ])
+				idx <- which(clusters[[i]]$cluster == clst)
+				if("numeric" %in% class(cluster_data[[i]][idx, ])){
+					temp_cl <- rbind(temp_cl, cluster_data[[i]][idx, ])
+					temp_cl_sum <- rbind(temp_cl_sum, cluster_data[[i]][idx, ])
 				}else{
-					temp_cl <- rbind(temp_cl, apply(cluster_data[[i]][clusters[[i]]$cluster == clst, ], 2, FUN= mean))
-					temp_cl_sum <- rbind(temp_cl_sum, apply(cluster_data[[i]][clusters[[i]]$cluster == clst, ], 2, FUN= sum))
+					temp_cl <- rbind(temp_cl, apply(cluster_data[[i]][idx, ], 2, FUN= mean))
+					temp_cl_sum <- rbind(temp_cl_sum, apply(cluster_data[[i]][idx, ], 2, FUN= sum))
 				}
 			}
 		}else{
     	for(clst in unique(clusters[[i]]$clustering)){
-      	if(class(clusters[[i]]$data[clusters[[i]]$cluster == clst, ]) == "numeric"){
-        	temp_cl <- rbind(temp_cl, clusters[[i]]$data[clusters[[i]]$cluster == clst, ])
-        	temp_cl_sum <- rbind(temp_cl_sum, clusters[[i]]$data[clusters[[i]]$cluster == clst, ])
+				idx <- which(clusters[[i]]$cluster == clst)
+      	if("numeric" %in% class(clusters[[i]]$data[idx, ])){
+        	temp_cl <- rbind(temp_cl, clusters[[i]]$data[idx, ])
+        	temp_cl_sum <- rbind(temp_cl_sum, clusters[[i]]$data[idx, ])
       	}
       	else{
-        	temp_cl <- rbind(temp_cl, apply(clusters[[i]]$data[clusters[[i]]$cluster == clst, ], 2, FUN= mean))
-        	temp_cl_sum <- rbind(temp_cl_sum, apply(clusters[[i]]$data[clusters[[i]]$cluster == clst, ], 2, FUN= sum))
+					idx <- which(clusters[[i]]$cluster == clst)
+        	temp_cl <- rbind(temp_cl, apply(clusters[[i]]$data[idx, ], 2, FUN= mean))
+        	temp_cl_sum <- rbind(temp_cl_sum, apply(clusters[[i]]$data[idx, ], 2, FUN= sum))
       	}
     	}
 		}
@@ -255,15 +503,29 @@ print("done making mat")
 mc_names <- NULL;
 for(i in seq(length(clusters)))
   if(summary_method == "kmed" || summary_method == "kmed_means"){
-    mc_names <- c(mc_names, paste(names(clusters)[i], seq(nrow(clusters[[i]]$medoids)), sep= "_"))
+    mc_names <- c(mc_names, paste(names(clusters)[i], seq(length(unique(clusters[[i]]$clustering))), sep= "_"))
   }else if(summary_method == "kmeans"){
     mc_names <- c(mc_names, paste(names(clusters)[i], seq(nrow(clusters[[i]]$centers)), sep= "_"))
   }
+
 colnames(mat) <- mc_names
 colnames(mat_sum) <- mc_names
 
+##############################
+##############################
+final_umap_res <- uwot::umap(t(mat), pca= 30, pca_center= T, n_components= 2)
+
+celltypes <- sapply(colnames(mat), function(i) strsplit(i, "_")[[1]][1])
+df <- data.frame(UMAP1= final_umap_res[, 1], UMAP2= final_umap_res[, 2], celltype= celltypes)
 print("creating directory!")
 dir.create(output_file)
+library(ggplot2)
+pdf(paste0(output_file, "/umap_", summary_method, ".pdf"))
+print(ggplot(df, aes(x= UMAP1, y= UMAP2)) + geom_point(aes(color= celltype)) + theme_classic() + geom_text(aes(label= celltype),hjust=0, vjust=0, size= 3, check_overlap = T))
+dev.off()
+##############################
+##############################
+
 if(length(assay_hit)){
 	kk <- 5L
 	knn_res <- class::knn(train= RNA_metacell_umap, test= ATAC_umap, cl= rownames(RNA_metacell_umap), k= kk)
@@ -290,14 +552,6 @@ if(length(assay_hit)){
 	colnames(atac_metacell) <- uniq_mc
 	write.csv(atac_metacell, paste0(output_file, "/cellSummarized_ATAC_", summary_method, ".csv"))
 }
-final_umap_res <- umap::umap(t(mat))
-
-celltypes <- sapply(colnames(mat), function(i) strsplit(i, "_")[[1]][1])
-df <- data.frame(UMAP1= final_umap_res$layout[, 1], UMAP2= final_umap_res$layout[, 2], celltype= celltypes)
-library(ggplot2)
-pdf(paste0(output_file, "/umap_", summary_method, ".pdf"))
-ggplot(df, aes(x= UMAP1, y= UMAP2)) + geom_point(aes(color= celltype)) + theme_classic() + geom_text(aes(label= celltype),hjust=0, vjust=0, size= 3, check_overlap = T)
-dev.off()
 print("Done!")
 Rtnse_plot <- F
 if(Rtnse_plot){
