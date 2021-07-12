@@ -14,6 +14,7 @@ library(cowplot)
 summary_method <- "kmed_means" #kmed
 iter_flag <- F
 csv_flag <- F
+merge_flag <- T
 #args <- commandArgs(trailingOnly= T)
 #file_name <- args[1] # Path to where the Seurat object is stored
 #RNA_count_expression <- args[2]
@@ -23,10 +24,10 @@ csv_flag <- F
 
 argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005", "-umap T")
-#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized", "-umap T", "-assay meta.data$datasets2")
-merge_flag <- T
+#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_50", "-umap T", "-assay meta.data$datasets2")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
+expected_cells <- 30
 defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
@@ -259,6 +260,9 @@ merge_small_mc <- function(clustering, thresh= 30){
 		metacell_counts <- table(clustering)
 		mc_table_sorted <- sort(metacell_counts)
 		low_mc_idx <- which(metacell_counts < thresh)
+		if(!length(low_mc_idx)){
+			return(clustering)
+		}
 		idx <- order(metacell_counts[low_mc_idx], decreasing= F)
 		new_mc <- NULL;
 		mc_sum <- metacell_counts[low_mc_idx[idx][1]]
@@ -276,6 +280,9 @@ merge_small_mc <- function(clustering, thresh= 30){
 			mc_sum <- mc_sum + metacell_counts[low_mc_idx[idx][pointer]]
 			new_mc <- c(new_mc, names(metacell_counts[low_mc_idx[idx][pointer]]))
 			pointer <- pointer + 1
+			if(pointer > length(idx)){
+				break;
+			}
 		}
 		clustering[which(clustering %in% as.numeric(new_mc))] <- max_cluster_id
 		if(length(which(table(clustering) < thresh)) == 0){
@@ -316,7 +323,7 @@ for(ct in cell_types){
   if(length(k_hit)){
     k <- as.integer(arg_tokens[k_hit + 1])
   }else{
-    k <- floor(ncol(CT_cluster) / 30)
+    k <- floor(ncol(CT_cluster) / expected_cells)
     print(paste("Setting k to", k))
   }
   if(summary_method == "kmed" || summary_method == "kmed_means"){
@@ -327,7 +334,8 @@ for(ct in cell_types){
 		if(k >= ncol(CT_cluster)){
 			print("too small... gotta merge all cells into one metacell")
 			### merge all cells into one metacell
-		}else if(length(k) >0 && k > 3 && k < ncol(CT_cluster)){
+		#}else if(length(k) >0 && k > 3 && k < ncol(CT_cluster)){
+		}else if(length(k) >0 && k < ncol(CT_cluster)){
 			library(parallel)
 			#clust <- makeCluster(ceiling(detectCores()/2))
 			pass_num <- 1
@@ -335,7 +343,7 @@ for(ct in cell_types){
 			while(pass_num <= pass_max){
 				#clara_out <- invoke_clara(CT_cluster, original_CT_cluster, iter_flag, clusters, RNA_metacell_umap, ct, k)
 				clara_out <- invoke_clara_simplified(CT_cluster, k)
-				mc_qual <- metacell_quality(clara_out$clusters, expected_cell_num= 30, slack_ratio= .15)
+				mc_qual <- metacell_quality(clara_out$clusters, expected_cell_num= expected_cells, slack_ratio= .15)
 				#outlier_idx <- which(as.character(clara_out$clustering) %in% names(mc_qual[which(mc_qual == F)]))
 				outlier_idx <- get_outliers(clara_out$clusters, 10)
 				print(c("Pass:", pass_num, "valid metacells:", length(which(mc_qual == T)), "outliers:", length(outlier_idx)))
@@ -372,7 +380,7 @@ for(ct in cell_types){
 				print(plot_grid(p1, p2, rel_widths=c(.25, 1), ncol= 2))#align= "h"
 				## update k after removing outliars
 				ks_info[[ct]][[pass_num]] <- k
-				k <- floor(ncol(CT_cluster) / 30)
+				k <- floor(ncol(CT_cluster) / expected_cells)
 				pass_num <- pass_num + 1
 			}
 
@@ -385,7 +393,7 @@ for(ct in cell_types){
 
 			clusters[[ct]] <- clara_out$clusters
 			if(merge_flag){
-				clusters[[ct]]$clustering <- merge_small_mc(clusters[[ct]]$clustering)
+				clusters[[ct]]$clustering <- merge_small_mc(clusters[[ct]]$clustering, thresh= expected_cells)
 			}
 			print(table(clusters[[ct]]$clustering))
 			if(length(assay_hit)){
