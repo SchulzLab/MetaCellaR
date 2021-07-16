@@ -24,11 +24,10 @@ merge_flag <- T
 
 argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005", "-umap T")
-#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_50", "-umap T", "-assay meta.data$datasets2")
+#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_50", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
-expected_cells <- 30
-defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap")
+defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
 RNA_hit <- which(arg_tokens == defined_args[2])
@@ -37,6 +36,8 @@ output_hit <- which(arg_tokens == defined_args[4])
 k_hit <- which(arg_tokens == defined_args[5])
 assay_hit <- which(arg_tokens == defined_args[6])
 umap_hit <- which(arg_tokens == defined_args[7])
+ATAC_hit <- which(arg_tokens == defined_args[8])
+expCnt_hit <- which(arg_tokens == defined_args[9])
 if(length(umap_hit)){
 	umap_flag <- as.logical(arg_tokens[umap_hit + 1])
 }else{
@@ -46,6 +47,7 @@ if(length(file_hit)){
   if(length(RNA_hit) && length(celltype_hit)){
     file_name <- arg_tokens[file_hit + 1]
     RNA_count_expression <- arg_tokens[RNA_hit + 1]
+    ATAC_count_expression <- arg_tokens[ATAC_hit + 1]
     celltype_expression <- arg_tokens[celltype_hit + 1]
     assay_expression <- arg_tokens[assay_hit + 1]
   }
@@ -68,6 +70,11 @@ if(!length(output_hit)){
 }else{
   output_file <- arg_tokens[output_hit + 1]
 }
+if(!length(expCnt_hit)){
+	expected_cells <- as.numeric(arg_tokens[expCnt_hit + 1])
+}else{
+	expected_cells <- 30
+}
 ########################
 if(!csv_flag){
   library(Seurat)
@@ -87,9 +94,10 @@ if(!csv_flag){
 	na_idx <- is.na(celltypes)
 	if(sum(na_idx)){
 		## TODO:
-		Sub <- Sub[!na_idx, ]## I know that it doesn't work as I've already tested it on a Seurat obj... gotta find another way
+		Sub <- subset(Sub, !is.na(celltypes))## I know that it doesn't work as I've already tested it on a Seurat obj... gotta find another way
 	}
   RNAcounts <- eval(parse(text= paste0(Rds_name, "@", RNA_count_expression))) #Sub@assays$RNA@counts
+  ATACcounts <- eval(parse(text= paste0(Rds_name, "@", ATAC_count_expression))) #Sub@assays$RNA@counts
 	gene_names <- rownames(RNAcounts)
 	RNAcounts <- as.matrix(RNAcounts)
   cell_types <- unique(as.character(celltypes))
@@ -97,7 +105,7 @@ if(!csv_flag){
 	  assays <- eval(parse(text= paste0(Rds_name, "@", assay_expression)))
 
 	  rna_hits <- which(tolower(assays) == "scrna-seq" | tolower(assays) == "scrna" | tolower(assays) == "scrna" | tolower(assays) == "rna")
-	  ATACcounts <- RNAcounts[, -rna_hits]
+	  ATACcounts <- ATACcounts[, -rna_hits]
 	  RNAcounts <- RNAcounts[, rna_hits]
 		general_data <- RNAcounts
 	  RNA_celltypes <- celltypes[rna_hits]
@@ -549,16 +557,21 @@ if(length(assay_hit)){
 
 	uniq_mc <- unique(atac2metacell_info$metacell)
 	atac_metacell <- NULL;
+	atac_metacell_sum <- NULL;
 	for(i in seq(length(uniq_mc))){
 		hits <- atac2metacell_info$barcode[which(atac2metacell_info$metacell == uniq_mc[i])];
 		if(length(hits) > 1){
 			atac_metacell <- cbind(atac_metacell, rowMeans(as.matrix(ATACcounts)[, hits]))
+			atac_metacell_sum <- cbind(atac_metacell_sum, rowSums(as.matrix(ATACcounts)[, hits]))
 		}else{
 			atac_metacell <- cbind(atac_metacell, as.matrix(ATACcounts)[, hits])
+			atac_metacell_sum <- cbind(atac_metacell_sum, as.matrix(ATACcounts)[, hits])
 		}
 	}
 	colnames(atac_metacell) <- uniq_mc
+	colnames(atac_metacell_sum) <- uniq_mc
 	write.csv(atac_metacell, paste0(output_file, "/cellSummarized_ATAC_", summary_method, ".csv"))
+	write.csv(atac_metacell_sum, paste0(output_file, "/cellSummarized_ATAC_", summary_method, "_sum.csv"))
 }
 print("Done!")
 Rtnse_plot <- F
