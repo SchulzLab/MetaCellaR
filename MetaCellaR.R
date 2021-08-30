@@ -22,9 +22,9 @@ merge_flag <- T
 ########################
 ## Parse arguments
 
-argsexpr <- commandArgs(trailingOnly= T)
+#argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005", "-umap T")
-#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_50", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts")
+argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_30_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 30")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
 defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e")
@@ -130,7 +130,8 @@ if(umap_flag){
 		#umap_res <- umap::umap(pca_res$rotation, n_components= 20, n_threads= 10)
 		##Seurat way###
     ptm_umap <- proc.time(); 
-    umap_layout <- uwot::umap(t(as.matrix(csv_data)), pca= 30, pca_center= T, n_components= 20)
+    umap_layout <- uwot::umap(t(as.matrix(csv_data)), pca= 30, pca_center= T, n_components= 2)
+		rownames(umap_layout) <- colnames(csv_data)
 		print(paste("UMAP computation time:", proc.time() - ptm_umap))
 		celltypes <- csv_cells[, 2]
 	}else{
@@ -147,9 +148,11 @@ if(umap_flag){
 		#print(paste("UMAP computation time:", (proc.time() - ptm)))
 		##Seurat way###
 		ptm_umap <- proc.time();
-		umap_layout <- uwot::umap(t(as.matrix(RNAcounts)), pca= 30, pca_center= T, n_components= 20)
+		umap_layout <- uwot::umap(t(as.matrix(RNAcounts)), pca= 30, pca_center= T, n_components= 2)
 		print(paste("UMAP computation time:", proc.time() - ptm_umap))
+		rownames(umap_layout) <- colnames(RNAcounts)
 	}
+	RNA_umap <- umap_layout
 }
 clusters <- list()
 all_mediods <- list()
@@ -307,6 +310,7 @@ merge_small_mc <- function(clustering, thresh= 30){
 ## optimize with 30 or different slack and see if it makes sense to do the second pass
 mc_quality_info <- list()
 mc_outlier_info <- list()
+RNA_barcodes_ct <- NULL
 mc_distr <- list()
 ks_info <- list()
 library(pheatmap)
@@ -414,10 +418,13 @@ for(ct in cell_types){
 						RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, colMeans(data_subset))
 					}
 				}
-				rownames(RNA_metacell_umap_ct) <- paste(ct, seq(nrow(RNA_metacell_umap_ct)), sep= "_")
+				#rownames(RNA_metacell_umap_ct) <- paste(ct, seq(nrow(RNA_metacell_umap_ct)), sep= "_")
+				rownames(RNA_metacell_umap_ct) <- paste(ct, unique(clusters[[ct]]$clustering), sep= "_")
 				print(paste("Done clustering", ct))
 				RNA_metacell_umap <- rbind(RNA_metacell_umap, RNA_metacell_umap_ct)
 			}
+			#RNA_barcodes_ct <- c(RNA_barcodes_ct, colnames(original_CT_cluster))
+			RNA_barcodes_ct <- c(RNA_barcodes_ct, rownames(cluster_data[[ct]]))
 			cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
 	}	
 	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
@@ -547,7 +554,7 @@ if(length(assay_hit)){
 	knn_res <- class::knn(train= RNA_metacell_umap, test= ATAC_umap, cl= rownames(RNA_metacell_umap), k= kk)
 	atac2metacell_info <- data.frame(barcode= rownames(ATAC_umap), metacell= knn_res)
 	write.csv(atac2metacell_info, paste0(output_file, "/ATAC_cell2metacell_info_", summary_method, ".csv"), row.names= F)
-	rna2metacell_info <- data.frame(barcode= rownames(RNA_umap), metacell= cell2metacell_info)
+	rna2metacell_info <- data.frame(barcode= RNA_barcodes_ct, metacell= cell2metacell_info)
 	write.csv(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 }
 write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
@@ -581,4 +588,84 @@ if(Rtnse_plot){
   pdf(paste0(output_file, "/tSNE_", summary_method, "_Rtsne.pdf"))
   plot(Rtsne_whole_res$Y)
   dev.off()
+}
+
+
+if(length(assay_hit)){
+#################################################
+############# BEGIN VISUALIZATION ###############
+
+	library(ggplot2)
+	addSmallLegend <- function(myPlot, pointSize = 0.5, textSize = 3, spaceLegend = 0.1) {
+		myPlot +
+			guides(shape = guide_legend(override.aes = list(size = pointSize)),
+						 color = guide_legend(override.aes = list(size = pointSize))) +
+	theme(legend.title = element_text(size = textSize), legend.text  = element_text(size = textSize), legend.key.size = unit(spaceLegend, "lines"))
+	}
+####
+###
+##
+	ATAC_info <- atac2metacell_info
+	RNA_info <- rna2metacell_info
+	df <- data.frame(umap1= Sub[["umap"]]@cell.embeddings[, 1], umap2= Sub[["umap"]]@cell.embeddings[, 2], assays= assays)
+	df$Seurat_celltype <- Sub@meta.data$Celltypes_refined
+#df$Seurat_celltype <- as.character(Sub@meta.data$seurat_clusters)
+	df <- cbind(df[c(ATAC_info$barcode, RNA_info$barcode), ], rbind(ATAC_info, RNA_info))
+	celltypes <- sapply(as.character(df$metacell), function(i) strsplit(i, "_")[[1]][1])
+	uniq_celltypes <- unique(celltypes)
+	df$celltype <- celltypes
+
+	pdf(paste0(output_file, "/plot_umap_mc_", expected_cells, ".pdf")); print(ggplot(df, aes(x= umap1, y= umap2, shape= assays, colour= Seurat_celltype)) + geom_point(alpha= .6) + theme_classic()); for(i in seq(length(unique(celltypes)))) {myPlot <- ggplot(subset(df, celltype == uniq_celltypes[i]), aes(x= umap1, y= umap2, shape= assays)) + geom_point(aes(colour= metacell)) + ggtitle(uniq_celltypes[i]) + theme_classic(); print(addSmallLegend(myPlot))}; dev.off()
+
+###############
+	df2 <- data.frame(umap1= Sub[["umap"]]@cell.embeddings[, 1], umap2= Sub[["umap"]]@cell.embeddings[, 2], assays= assays, Seurat_celltype= Sub@meta.data$Celltypes_refined)
+	pdf(paste0("plot_umap_seurat_", expected_cells, ".pdf")); for(i in seq(length(unique(celltypes)))) {print(ggplot(subset(df2, Seurat_celltype == uniq_celltypes[i]), aes(x= umap1, y= umap2, shape= Seurat_celltype, colour= assays)) + geom_point(alpha= .6) + ggtitle(uniq_celltypes[i]) + theme_classic())}; dev.off()
+###############
+
+	rna_cnt <- table(RNA_info$metacell)
+	atac_cnt <- table(ATAC_info$metacell)
+
+	df_main <- data.frame(RNA_mc_cnt= as.numeric(rna_cnt), row.names= names(rna_cnt))
+	df_main$ATAC_mc_cnt <- 0
+	df_main[names(atac_cnt), ]$ATAC_mc_cnt <- as.numeric(atac_cnt)
+	df_main$celltype <- sapply(rownames(df_main), function(i) strsplit(i, "_")[[1]][1])
+	pdf(paste0(output_file, "/MC_scatterplots_", expected_cells, ".pdf"))
+	print(ggplot(df_main, aes(x= RNA_mc_cnt, y= ATAC_mc_cnt)) + geom_point(colour= "blue") + theme_classic() + ggtitle("all cell types"))
+	for(ct in unique(df_main$celltype))
+		print(ggplot(subset(df_main, celltype == ct), aes(x= RNA_mc_cnt, y= ATAC_mc_cnt)) + geom_point(colour= "blue") + theme_classic() + ggtitle(ct))
+
+	library(data.table)
+	dt_main <- as.data.table(df_main)
+	dt <- melt(dt_main, id.vars= "celltype", variable.name= "assay", value.name= "mc_count")
+
+
+	print(ggplot(dt, aes(x= celltype, y= mc_count)) + geom_boxplot(aes(fill= assay)) + geom_hline(yintercept= expected_cells, linetype="dashed", color = "green") + theme_classic() + geom_text(aes(-1, expected_cells, label = "exp. num. cells", hjust = 0, vjust= 1), color= "green") + theme(axis.text.x = element_text(angle = 45)))
+#######
+	rna_rc <- mat_sum
+	atac_rc <- atac_metacell_sum 
+	rna_rc_sum <- colSums(rna_rc)
+	atac_rc_sum <- colSums(atac_rc)
+#######
+
+	rc_dt <- data.table(read_counts= c(rna_rc_sum, atac_rc_sum), assay= c(rep("RNA", length(rna_rc_sum)), rep("ATAC", length(atac_rc))))
+	rc_dt_log <- rc_dt
+	rc_dt_log$read_counts <- log2(1 + rc_dt_log$read_counts)
+
+	print(ggplot(rc_dt_log, aes(x= assay, y= read_counts)) + geom_boxplot() + theme_classic() + ylab("log2(1 + sum of read counts per metacell)"))
+
+	dev.off()
+
+	if(F){## I have to add the UMAP of ATAC counts and then make the plots... right now it's only for the RNAs.
+		pdf(paste0(output_file, "/MC_umaps_", expected_cells, ".pdf"))
+		umap_df <- data.frame(UMAP1= umap_res[, 1], UMAP2= umap_res[, 2])
+		umap_df_reordered <- umap_df[RNA_info$barcode,]
+		umap_df_reordered$MC <- RNA_info$metacell
+		ggplot(umap_df_reordered, aes(x= UMAP1, y= UMAP2)) + geom_point(aes(colour= MC), alpha= .5) + theme_classic() + theme(legend.position='none')
+		umap_celltypes <- sapply(umap_df_reordered$MC, function(i) strsplit(i, "_")[[1]][1])
+		for(ct in unique(umap_celltypes)){
+			hits <- which(umap_celltypes == ct)
+			print(ggplot(umap_df_reordered[hits, ], aes(x= UMAP1, y= UMAP2)) + geom_point(aes(colour= MC), alpha= .5) + theme_classic() + theme(legend.position='none') + ggtitle(ct))
+		}
+		dev.off()
+	}
 }
