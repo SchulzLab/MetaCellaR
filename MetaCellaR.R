@@ -24,7 +24,7 @@ merge_flag <- T
 
 argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005", "-umap T")
-#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_30_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 30")
+#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
 defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e")
@@ -629,6 +629,7 @@ if(length(assay_hit)){
 	df_main$ATAC_mc_cnt <- 0
 	df_main[names(atac_cnt), ]$ATAC_mc_cnt <- as.numeric(atac_cnt)
 	df_main$celltype <- sapply(rownames(df_main), function(i) strsplit(i, "_")[[1]][1])
+	print(paste("expected_cells=", expected_cells))
 	pdf(paste0(output_file, "/MC_scatterplots_", expected_cells, ".pdf"))
 	print(ggplot(df_main, aes(x= RNA_mc_cnt, y= ATAC_mc_cnt)) + geom_point(colour= "blue") + theme_classic() + ggtitle("all cell types"))
 	for(ct in unique(df_main$celltype))
@@ -647,7 +648,7 @@ if(length(assay_hit)){
 	atac_rc_sum <- colSums(atac_rc)
 #######
 
-	rc_dt <- data.table(read_counts= c(rna_rc_sum, atac_rc_sum), assay= c(rep("RNA", length(rna_rc_sum)), rep("ATAC", length(atac_rc))))
+	rc_dt <- data.table(read_counts= c(rna_rc_sum, atac_rc_sum), assay= c(rep("RNA", length(rna_rc_sum)), rep("ATAC", length(atac_rc_sum))))
 	rc_dt_log <- rc_dt
 	rc_dt_log$read_counts <- log2(1 + rc_dt_log$read_counts)
 
