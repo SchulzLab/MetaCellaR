@@ -70,7 +70,7 @@ if(!length(output_hit)){
 }else{
   output_file <- arg_tokens[output_hit + 1]
 }
-if(!length(expCnt_hit)){
+if(length(expCnt_hit)){
 	expected_cells <- as.numeric(arg_tokens[expCnt_hit + 1])
 }else{
 	expected_cells <- 30
