@@ -480,6 +480,7 @@ if(pass_max > 1){
 print("Done clustering!")
 mat <- NULL
 mat_sum <- NULL
+mc_names <- NULL
 for(i in seq(length(clusters))){
   if(summary_method == "kmed"){
     mat <- cbind(mat, t(clusters[[i]]$medoids))
@@ -492,6 +493,7 @@ for(i in seq(length(clusters))){
 		if(umap_flag){
 			for(clst in unique(clusters[[i]]$clustering)){
 				idx <- which(clusters[[i]]$cluster == clst)
+				mc_names <- c(mc_names, paste0(names(clusters)[i], "_", clst))
 				if("numeric" %in% class(cluster_data[[i]][idx, ])){
 					temp_cl <- rbind(temp_cl, cluster_data[[i]][idx, ])
 					temp_cl_sum <- rbind(temp_cl_sum, cluster_data[[i]][idx, ])
@@ -523,16 +525,7 @@ for(i in seq(length(clusters))){
 
 print("done making mat")
 
-mc_names <- NULL;
-for(i in seq(length(clusters)))
-  if(summary_method == "kmed" || summary_method == "kmed_means"){
-    mc_names <- c(mc_names, paste(names(clusters)[i], seq(length(unique(clusters[[i]]$clustering))), sep= "_"))
-  }else if(summary_method == "kmeans"){
-    mc_names <- c(mc_names, paste(names(clusters)[i], seq(nrow(clusters[[i]]$centers)), sep= "_"))
-  }
-
-colnames(mat) <- mc_names
-colnames(mat_sum) <- mc_names
+colnames(mat) <- colnames(mat_sum) <- mc_names
 
 ##############################
 ##############################
