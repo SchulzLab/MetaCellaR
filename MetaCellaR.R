@@ -25,7 +25,7 @@ merge_flag <- T
 argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005", "-umap T")
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3008_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_in_GAZE_3008", "-umap T", "-e 30")
-argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100")
+#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
 defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e", "-t")
