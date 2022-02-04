@@ -24,10 +24,11 @@ merge_flag <- T
 
 argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005", "-umap T")
-#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100")
+#argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3008_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_in_GAZE_3008", "-umap T", "-e 30")
+argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
-defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e")
+defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e", "-t")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
 RNA_hit <- which(arg_tokens == defined_args[2])
@@ -38,6 +39,7 @@ assay_hit <- which(arg_tokens == defined_args[6])
 umap_hit <- which(arg_tokens == defined_args[7])
 ATAC_hit <- which(arg_tokens == defined_args[8])
 expCnt_hit <- which(arg_tokens == defined_args[9])
+t_hit <- which(arg_tokens == defined_args[10])
 if(length(umap_hit)){
 	umap_flag <- as.logical(arg_tokens[umap_hit + 1])
 }else{
@@ -75,6 +77,11 @@ if(length(expCnt_hit)){
 }else{
 	expected_cells <- 30
 }
+if(length(t_hit)){
+	threshold <- as.numeric(arg_tokens[t_hit + 1])
+}else{
+	threshold <- 3 * expected_cells
+}
 ########################
 if(!csv_flag){
   library(Seurat)
@@ -96,12 +103,13 @@ if(!csv_flag){
 		## TODO:
 		Sub <- subset(Sub, !is.na(celltypes))## I know that it doesn't work as I've already tested it on a Seurat obj... gotta find another way
 	}
+	print(paste("RNA_count_expression:", RNA_count_expression))
   RNAcounts <- eval(parse(text= paste0(Rds_name, "@", RNA_count_expression))) #Sub@assays$RNA@counts
-  ATACcounts <- eval(parse(text= paste0(Rds_name, "@", ATAC_count_expression))) #Sub@assays$RNA@counts
 	gene_names <- rownames(RNAcounts)
 	RNAcounts <- as.matrix(RNAcounts)
   cell_types <- unique(as.character(celltypes))
   if(length(assay_hit)){
+  	ATACcounts <- eval(parse(text= paste0(Rds_name, "@", ATAC_count_expression))) #Sub@assays$RNA@counts
 	  assays <- eval(parse(text= paste0(Rds_name, "@", assay_expression)))
 
 	  rna_hits <- which(tolower(assays) == "scrna-seq" | tolower(assays) == "scrna" | tolower(assays) == "scrna" | tolower(assays) == "rna")
@@ -163,6 +171,34 @@ print(dim(RNAcounts))
 
 ####### Begin functions #######
 ################################
+my_knn <- function(train, test, k= 1, threshold= 3 * expected_cells){
+	dist_mat <- matrix(NA, nrow= nrow(test), ncol= nrow(train)) ## Matrix holding the distances of any ATAC point to any RNA metacell
+	MC_tracking <-seq(ncol(dist_mat)) * 0
+	for(i in seq(nrow(test))){
+		## Compute the distance between each test point and all the training points
+		rep_test <- matrix(rep(test[i, ], nrow(train)), byrow= T, nrow= nrow(train), ncol= ncol(train))
+		dist <- sqrt(rowSums((rep_test - train)^2)) ## Euclidean distance
+		dist_mat[i, ] <- dist		
+	}
+
+	### Assign the labels while keeping track of the label satuaration for any specific metacell
+	i <- 1;
+	labels <- vector("character", length= nrow(test))
+	while(i <= nrow(dist_mat)){
+		hit <- which.min(dist_mat[i, ]);
+		if(MC_tracking[hit] < threshold){
+			MC_tracking[hit] <- MC_tracking[hit] + 1;
+			labels[i] <- rownames(train)[hit];
+			i <- i + 1
+		}else{
+			dist_mat[i, hit] <- Inf;
+		}
+	}
+	return(labels)
+
+}
+
+#####
 
 invoke_clara <- function(CT_cluster, original_CT_cluster, iter_flag, clusters, RNA_metacell_umap, ct, k){
 	class(CT_cluster)
@@ -336,15 +372,25 @@ for(ct in cell_types){
     k <- as.integer(arg_tokens[k_hit + 1])
   }else{
     k <- floor(ncol(CT_cluster) / expected_cells)
-    print(paste("Setting k to", k))
+		if(!k){
+			k <- ncol(CT_cluster)
+			print(paste("Setting k to", k))
+		}else{
+	    print(paste("Setting k to", k))
+		}
   }
   if(summary_method == "kmed" || summary_method == "kmed_means"){
     print(paste("k=", k, "ncol(CT_cluster)=", ncol(CT_cluster)))
 	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
 	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
 	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
-		if(k >= ncol(CT_cluster)){
+		if(k >= ifelse(is.null(ncol(original_CT_cluster)), 1, ncol(original_CT_cluster))){
 			print("too small... gotta merge all cells into one metacell")
+			if(ct == "CM4"){
+				print(paste0("ncol(ncol(original_CT_cluster))= ", ncol(original_CT_cluster)))
+			}
+			clusters[[ct]]$clustering <- rep(1, ifelse(is.null(ncol(original_CT_cluster)), 1, ncol(original_CT_cluster)))
+			cluster_data[[ct]] <- t(as.matrix(original_CT_cluster))
 			### merge all cells into one metacell
 		#}else if(length(k) >0 && k > 3 && k < ncol(CT_cluster)){
 		}else if(length(k) >0 && k < ncol(CT_cluster)){
@@ -380,16 +426,25 @@ for(ct in cell_types){
 				}
 				## plot the metacell count table with a dendrogram obtained from mean clusters
 				cluster_means_res <- cluster_means(clara_out$clusters)
-				hc_res <- hclust(d = dist(x = cluster_means_res))
-				df <- data.frame(table(clara_out$clusters$clustering));
-				df$y <- as.factor(rep(1, nrow(df)))
-				df_ordered <- df[hc_res$order, ]
-				df_ordered$Var1 <- factor(df_ordered$Var1, levels= df_ordered$Var1)
-				p1 <- ggplot(df_ordered, aes(y= Var1, x= y)) + geom_tile(show.legend= F, color= "gray", fill= "white") + theme_classic() + geom_text(aes(label= Freq), size= 1) + theme(axis.text = element_text(size = 3)) + theme(axis.text.y = element_text(size = rel(1), hjust = 1, angle = 0), 
-          # margin: top, right, bottom, and left ->  plot.margin = unit(c(1, 0.2, 0.2, -0.5), "cm"), 
-          panel.grid.minor = element_blank()) + ggtitle(ct)
-				p2 <- ggdendrogram(data = as.dendrogram(hc_res), rotate= T, segments= T, leaf_labels= F) + geom_text(size= 1)
-				print(plot_grid(p1, p2, rel_widths=c(.25, 1), ncol= 2))#align= "h"
+				print(paste("dim(cluster_means_res):", dim(cluster_means_res)))
+				tryCatch(
+					 {
+						hc_res <- hclust(d = dist(x = cluster_means_res))
+						df <- data.frame(table(clara_out$clusters$clustering));
+						df$y <- as.factor(rep(1, nrow(df)))
+						df_ordered <- df[hc_res$order, ]
+						df_ordered$Var1 <- factor(df_ordered$Var1, levels= df_ordered$Var1)
+						p1 <- ggplot(df_ordered, aes(y= Var1, x= y)) + geom_tile(show.legend= F, color= "gray", fill= "white") + theme_classic() + geom_text(aes(label= Freq), size= 1) + theme(axis.text = element_text(size = 3)) + theme(axis.text.y = element_text(size = rel(1), hjust = 1, angle = 0), 
+							# margin: top, right, bottom, and left ->  plot.margin = unit(c(1, 0.2, 0.2, -0.5), "cm"), 
+							panel.grid.minor = element_blank()) + ggtitle(ct)
+						p2 <- ggdendrogram(data = as.dendrogram(hc_res), rotate= T, segments= T, leaf_labels= F) + geom_text(size= 1)
+						print(plot_grid(p1, p2, rel_widths=c(.25, 1), ncol= 2))#align= "h"
+					},
+					error= function(e){
+						message(paste("dim(cluster_means_res):", dim(cluster_means_res)))
+						message(e)
+					}
+				)
 				## update k after removing outliars
 				ks_info[[ct]][[pass_num]] <- k
 				k <- floor(ncol(CT_cluster) / expected_cells)
@@ -543,13 +598,15 @@ dev.off()
 ##############################
 
 if(length(assay_hit)){
-	kk <- 5L
-	knn_res <- class::knn(train= RNA_metacell_umap, test= ATAC_umap, cl= rownames(RNA_metacell_umap), k= kk)
+	#kk <- 5L
+	#knn_res <- class::knn(train= RNA_metacell_umap, test= ATAC_umap, cl= rownames(RNA_metacell_umap), k= kk)
+	knn_res <- my_knn(train= RNA_metacell_umap, test= ATAC_umap, threshold= threshold)
 	atac2metacell_info <- data.frame(barcode= rownames(ATAC_umap), metacell= knn_res)
 	write.csv(atac2metacell_info, paste0(output_file, "/ATAC_cell2metacell_info_", summary_method, ".csv"), row.names= F)
-	rna2metacell_info <- data.frame(barcode= RNA_barcodes_ct, metacell= cell2metacell_info)
-	write.csv(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 }
+
+rna2metacell_info <- data.frame(barcode= RNA_barcodes_ct, metacell= cell2metacell_info)
+write.csv(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
 write.csv(mat_sum, paste0(output_file, "/cellSummarized_", summary_method, "_sum.csv"))
 if(length(assay_hit)){
