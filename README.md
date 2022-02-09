@@ -1,7 +1,7 @@
 # MetaCellaR
 MetaCellaR is an Rscript to summerize single cells based on k-medoids. The clustering is done per cell type. We refer to these clusters as metacells.
 Essentially, we compute the center of each metacell (by averaginf the gene expression profiles of cells that are grouped together into the same cluster) and consider this as the expression profile of a metacell. The gif below illustrates this procedure:
-![ Alt text](metacellar_gif.gif) / ! [](metacellar_gif.gif)
+![ Alt text](metacellar_gif.gif) [](metacellar_gif.gif)
 
 The input arguments to our MetaCellaR script are:
 - Use the `-file` argument followed by a file path to where the single cell, either a csv file or a Seurat object, is stored. In case of the csv file, the rows and columns must be annotated by gene names and cell names, respectively.
