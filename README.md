@@ -1,6 +1,9 @@
 # MetaCellaR
-MetaCellaR is an Rscript to summerize single cells based on k-medoids. The clustering is done per cell type.
-The input arguments to this script are:
+MetaCellaR is an Rscript to summerize single cells based on k-medoids. The clustering is done per cell type. We refer to these clusters as metacells.
+Essentially, we compute the center of each metacell (by averaginf the gene expression profiles of cells that are grouped together into the same cluster) and consider this as the expression profile of a metacell. The gif below illustrates this procedure:
+![ Alt text](metacellar_gif.gif) / ! [](metacellar_gif.gif)
+
+The input arguments to our MetaCellaR script are:
 - Use the `-file` argument followed by a file path to where the single cell, either a csv file or a Seurat object, is stored. In case of the csv file, the rows and columns must be annotated by gene names and cell names, respectively.
 - In case of a csv input file explained above, the `-celltype` argument must be a 2-column table containing the mapping for cells to their cell types. First column must be the same as cell names provided in the csv file, and second column the cell types. In case of the Seurat object, the `-celltype` argument must be used to refer to the slot where the cell type annotation of single cells are stored in the Suerat object. For instance, if the full way to access the cell types stored in a Seurat object called `S` is to call `S@meta.data$celltype` then the user needs to type in `-celltype meta.data$celltype` to indicate that the cell type annotations for the single cell gene expression data are accessible via those slots/items.
 - `-RNA` is used only for the Seurat object. This argument refers to the slot where the RNA counts are stored in the Suerat object. For instance, if the full way to access the RNA counts stored in a Seurat object called `S` is to call `S@assays$RNA@counts` then the user needs to type in `-RNA assays$RNA@counts` to indicate that the single cell gene expression counts are accessible via those slots/items.
