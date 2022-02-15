@@ -15,7 +15,7 @@ summary_method <- "kmed_means" #kmed
 iter_flag <- F
 csv_flag <- F
 merge_flag <- T
-#args <- commandArgs(trailingOnly= T)
+args <- commandArgs(trailingOnly= T)
 #file_name <- args[1] # Path to where the Seurat object is stored
 #RNA_count_expression <- args[2]
 #celltype_expression <- args[3]
@@ -25,10 +25,10 @@ merge_flag <- T
 argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005", "-umap T")
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3008_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_in_GAZE_3008", "-umap T", "-e 30")
-#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100")
+#argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100", "-d 20")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
-defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e", "-t")
+defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e", "-t", "-d")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
 RNA_hit <- which(arg_tokens == defined_args[2])
@@ -40,6 +40,7 @@ umap_hit <- which(arg_tokens == defined_args[7])
 ATAC_hit <- which(arg_tokens == defined_args[8])
 expCnt_hit <- which(arg_tokens == defined_args[9])
 t_hit <- which(arg_tokens == defined_args[10])
+d_hit <- which(arg_tokens == defined_args[11])
 if(length(umap_hit)){
 	umap_flag <- as.logical(arg_tokens[umap_hit + 1])
 }else{
@@ -81,6 +82,11 @@ if(length(t_hit)){
 	threshold <- as.numeric(arg_tokens[t_hit + 1])
 }else{
 	threshold <- 3 * expected_cells
+}
+if(length(d_hit)){
+	umap_dim <- as.numeric(arg_tokens[d_hit + 1])
+}else{
+	umap_dim <- 20
 }
 ########################
 if(!csv_flag){
@@ -138,7 +144,7 @@ if(umap_flag){
 		#umap_res <- umap::umap(pca_res$rotation, n_components= 20, n_threads= 10)
 		##Seurat way###
     ptm_umap <- proc.time(); 
-    umap_layout <- uwot::umap(t(as.matrix(csv_data)), pca= 30, pca_center= T, n_components= 2)
+    umap_layout <- uwot::umap(t(as.matrix(csv_data)), pca= 30, pca_center= T, n_components= umap_dim)
 		rownames(umap_layout) <- colnames(csv_data)
 		print(paste("UMAP computation time:", proc.time() - ptm_umap))
 		celltypes <- csv_cells[, 2]
@@ -156,7 +162,7 @@ if(umap_flag){
 		#print(paste("UMAP computation time:", (proc.time() - ptm)))
 		##Seurat way###
 		ptm_umap <- proc.time();
-		umap_layout <- uwot::umap(t(as.matrix(RNAcounts)), pca= 30, pca_center= T, n_components= 2)
+		umap_layout <- uwot::umap(t(as.matrix(RNAcounts)), pca= 30, pca_center= T, n_components= umap_dim)
 		print(paste("UMAP computation time:", proc.time() - ptm_umap))
 		rownames(umap_layout) <- colnames(RNAcounts)
 	}
@@ -386,11 +392,28 @@ for(ct in cell_types){
 	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
 		if(k >= ifelse(is.null(ncol(original_CT_cluster)), 1, ncol(original_CT_cluster))){
 			print("too small... gotta merge all cells into one metacell")
-			if(ct == "CM4"){
-				print(paste0("ncol(ncol(original_CT_cluster))= ", ncol(original_CT_cluster)))
-			}
 			clusters[[ct]]$clustering <- rep(1, ifelse(is.null(ncol(original_CT_cluster)), 1, ncol(original_CT_cluster)))
 			cluster_data[[ct]] <- t(as.matrix(original_CT_cluster))
+			## When original_CT_cluster is a vector, it loses its colname. That's why I had to add the line below to extract the correct annotation, especially for the RNA_barcodes_ct later. However, this fix will only apply to Seurat input data, and not the csv data. N.B. I'm using RNAcounts to infer the names.
+			rownames(cluster_data[[ct]]) <- colnames(RNAcounts)[which(celltypes == ct)]
+			RNA_barcodes_ct <- c(RNA_barcodes_ct, rownames(cluster_data[[ct]]))
+      cell2metacell_info <- c(cell2metacell_info, paste(ct, clusters[[ct]]$clustering, sep= "_"))
+
+			if(length(assay_hit)){
+				RNA_metacell_umap_ct <- NULL
+				for(i in unique(clusters[[ct]]$clustering)){
+					data_subset <- RNA_umap[which(clusters[[ct]]$clustering == i), ];
+					if(is.null(dim(data_subset))){
+						RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, data_subset);
+					}else{
+						RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, colMeans(data_subset))
+					}
+				}
+				#rownames(RNA_metacell_umap_ct) <- paste(ct, seq(nrow(RNA_metacell_umap_ct)), sep= "_")
+				rownames(RNA_metacell_umap_ct) <- paste(ct, unique(clusters[[ct]]$clustering), sep= "_")
+				print(paste("Done clustering", ct))
+				RNA_metacell_umap <- rbind(RNA_metacell_umap, RNA_metacell_umap_ct)
+			}
 			### merge all cells into one metacell
 		#}else if(length(k) >0 && k > 3 && k < ncol(CT_cluster)){
 		}else if(length(k) >0 && k < ncol(CT_cluster)){
@@ -584,7 +607,9 @@ colnames(mat) <- colnames(mat_sum) <- mc_names
 
 ##############################
 ##############################
-final_umap_res <- uwot::umap(t(mat), pca= 30, pca_center= T, n_components= 2)
+final_umap_res <- uwot::umap(t(mat), pca= 30, pca_center= T, n_components= umap_dim)
+rownames(final_umap_res) <- colnames(mat)
+colnames(final_umap_res) <- paste0("UMAP", seq(umap_dim))
 
 celltypes <- sapply(colnames(mat), function(i) strsplit(i, "_")[[1]][1])
 df <- data.frame(UMAP1= final_umap_res[, 1], UMAP2= final_umap_res[, 2], celltype= celltypes)
@@ -609,6 +634,7 @@ rna2metacell_info <- data.frame(barcode= RNA_barcodes_ct, metacell= cell2metacel
 write.csv(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
 write.csv(mat_sum, paste0(output_file, "/cellSummarized_", summary_method, "_sum.csv"))
+write.csv(final_umap_res, paste0(output_file, "/RNA_metacell_umap_", summary_method, ".csv"))
 if(length(assay_hit)){
 	save(atac2metacell_info, ATACcounts, clusters, RNA_metacell_umap, ATAC_umap, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
 
