@@ -15,7 +15,7 @@ summary_method <- "kmed_means" #kmed
 iter_flag <- F
 csv_flag <- F
 merge_flag <- T
-args <- commandArgs(trailingOnly= T)
+#args <- commandArgs(trailingOnly= T)
 #file_name <- args[1] # Path to where the Seurat object is stored
 #RNA_count_expression <- args[2]
 #celltype_expression <- args[3]
@@ -28,7 +28,7 @@ argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100", "-d 20")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
-defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e", "-t", "-d")
+defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e", "-t", "-d", "-reduction")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
 RNA_hit <- which(arg_tokens == defined_args[2])
@@ -41,6 +41,12 @@ ATAC_hit <- which(arg_tokens == defined_args[8])
 expCnt_hit <- which(arg_tokens == defined_args[9])
 t_hit <- which(arg_tokens == defined_args[10])
 d_hit <- which(arg_tokens == defined_args[11])
+reduction_hit <- which(arg_tokens == defined_args[12])
+if(length(reduction_hit)){
+	reduction <- arg_tokens[reduction_hit + 1]
+}else{
+	reduction <- "umap" ## default UMAP that should be in the Seurat integration
+}
 if(length(umap_hit)){
 	umap_flag <- as.logical(arg_tokens[umap_hit + 1])
 }else{
@@ -124,8 +130,8 @@ if(!csv_flag){
 		general_data <- RNAcounts
 	  RNA_celltypes <- celltypes[rna_hits]
 	  ATAC_celltypes <- celltypes[-rna_hits]
-		RNA_umap <- Sub[["umap"]]@cell.embeddings[rna_hits, ]
-		ATAC_umap <- Sub[["umap"]]@cell.embeddings[-rna_hits, ]
+		RNA_umap <- Sub[[reduction]]@cell.embeddings[rna_hits, ]
+		ATAC_umap <- Sub[[reduction]]@cell.embeddings[-rna_hits, ]
 		print("ATAC_umap")
 		print(head(ATAC_umap))
 	  celltypes <- RNA_celltypes
@@ -392,6 +398,7 @@ for(ct in cell_types){
 	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
 		if(k >= ifelse(is.null(ncol(original_CT_cluster)), 1, ncol(original_CT_cluster))){
 			print("too small... gotta merge all cells into one metacell")
+			stop()
 			clusters[[ct]]$clustering <- rep(1, ifelse(is.null(ncol(original_CT_cluster)), 1, ncol(original_CT_cluster)))
 			cluster_data[[ct]] <- t(as.matrix(original_CT_cluster))
 			## When original_CT_cluster is a vector, it loses its colname. That's why I had to add the line below to extract the correct annotation, especially for the RNA_barcodes_ct later. However, this fix will only apply to Seurat input data, and not the csv data. N.B. I'm using RNAcounts to infer the names.
