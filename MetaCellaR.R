@@ -690,7 +690,7 @@ if(length(assay_hit)){
 ##
 	ATAC_info <- atac2metacell_info
 	RNA_info <- rna2metacell_info
-	df <- data.frame(umap1= Sub[["umap"]]@cell.embeddings[, 1], umap2= Sub[["umap"]]@cell.embeddings[, 2], assays= assays)
+	df <- data.frame(umap1= Sub[[reduction]]@cell.embeddings[, 1], umap2= Sub[[reduction]]@cell.embeddings[, 2], assays= assays)
 	df$Seurat_celltype <- Sub@meta.data$Celltypes_refined
 #df$Seurat_celltype <- as.character(Sub@meta.data$seurat_clusters)
 	df <- cbind(df[c(ATAC_info$barcode, RNA_info$barcode), ], rbind(ATAC_info, RNA_info))
@@ -701,7 +701,7 @@ if(length(assay_hit)){
 	pdf(paste0(output_file, "/plot_umap_mc_", expected_cells, ".pdf")); print(ggplot(df, aes(x= umap1, y= umap2, shape= assays, colour= Seurat_celltype)) + geom_point(alpha= .6) + theme_classic()); for(i in seq(length(unique(celltypes)))) {myPlot <- ggplot(subset(df, celltype == uniq_celltypes[i]), aes(x= umap1, y= umap2, shape= assays)) + geom_point(aes(colour= metacell)) + ggtitle(uniq_celltypes[i]) + theme_classic(); print(addSmallLegend(myPlot))}; dev.off()
 
 ###############
-	df2 <- data.frame(umap1= Sub[["umap"]]@cell.embeddings[, 1], umap2= Sub[["umap"]]@cell.embeddings[, 2], assays= assays, Seurat_celltype= Sub@meta.data$Celltypes_refined)
+	df2 <- data.frame(umap1= Sub[[reduction]]@cell.embeddings[, 1], umap2= Sub[[reduction]]@cell.embeddings[, 2], assays= assays, Seurat_celltype= Sub@meta.data$Celltypes_refined)
 	pdf(paste0("plot_umap_seurat_", expected_cells, ".pdf")); for(i in seq(length(unique(celltypes)))) {print(ggplot(subset(df2, Seurat_celltype == uniq_celltypes[i]), aes(x= umap1, y= umap2, shape= Seurat_celltype, colour= assays)) + geom_point(alpha= .6) + ggtitle(uniq_celltypes[i]) + theme_classic())}; dev.off()
 ###############
 
