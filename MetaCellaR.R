@@ -24,7 +24,7 @@ merge_flag <- T
 
 argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3005_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_3005", "-umap T")
-#argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3008_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_in_GAZE_3008", "-umap T", "-e 30")
+#argsexpr <- c("-file /projects/expregulation/work/singleCell/heart_data/Metacell_Rda_files/3008_.Rds", "-RNA assays$RNA@counts", "-celltype meta.data$celltype", "-output MetaCellar_in_GAZE_3008", "-umap T", "-e 30", "-d 2")
 #argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100", "-d 20")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
@@ -109,6 +109,7 @@ if(!csv_flag){
   print("Done loading the Seurat object")
   print("Done loading Rds!")
   celltypes <- eval(parse(text= paste0(Rds_name, "@", celltype_expression)))
+	original_celltypes <- celltypes
 	## Identify NA cell annotation and remove them from the object
 	na_idx <- is.na(celltypes)
 	if(sum(na_idx)){
@@ -150,7 +151,7 @@ if(umap_flag){
 		#umap_res <- umap::umap(pca_res$rotation, n_components= 20, n_threads= 10)
 		##Seurat way###
     ptm_umap <- proc.time(); 
-    umap_layout <- uwot::umap(t(as.matrix(csv_data)), pca= 30, pca_center= T, n_components= umap_dim)
+    umap_layout <- uwot::umap(t(as.matrix(csv_data)), pca= 30, pca_center= T, scale= T, n_components= umap_dim)
 		rownames(umap_layout) <- colnames(csv_data)
 		print(paste("UMAP computation time:", proc.time() - ptm_umap))
 		celltypes <- csv_cells[, 2]
@@ -168,7 +169,7 @@ if(umap_flag){
 		#print(paste("UMAP computation time:", (proc.time() - ptm)))
 		##Seurat way###
 		ptm_umap <- proc.time();
-		umap_layout <- uwot::umap(t(as.matrix(RNAcounts)), pca= 30, pca_center= T, n_components= umap_dim)
+		umap_layout <- uwot::umap(t(as.matrix(RNAcounts)), pca= 30, pca_center= T, scale= T, n_components= umap_dim)
 		print(paste("UMAP computation time:", proc.time() - ptm_umap))
 		rownames(umap_layout) <- colnames(RNAcounts)
 	}
@@ -398,7 +399,6 @@ for(ct in cell_types){
 	#########################%%%%%%%%%%%%%%%%%%%^^^^^^^^^^^^^^^%%%%%%%%%%%%%%%%%%%###############
 		if(k >= ifelse(is.null(ncol(original_CT_cluster)), 1, ncol(original_CT_cluster))){
 			print("too small... gotta merge all cells into one metacell")
-			stop()
 			clusters[[ct]]$clustering <- rep(1, ifelse(is.null(ncol(original_CT_cluster)), 1, ncol(original_CT_cluster)))
 			cluster_data[[ct]] <- t(as.matrix(original_CT_cluster))
 			## When original_CT_cluster is a vector, it loses its colname. That's why I had to add the line below to extract the correct annotation, especially for the RNA_barcodes_ct later. However, this fix will only apply to Seurat input data, and not the csv data. N.B. I'm using RNAcounts to infer the names.
@@ -614,7 +614,7 @@ colnames(mat) <- colnames(mat_sum) <- mc_names
 
 ##############################
 ##############################
-final_umap_res <- uwot::umap(t(mat), pca= 30, pca_center= T, n_components= umap_dim)
+final_umap_res <- uwot::umap(t(mat), pca= 30, pca_center= T, scale= T, n_components= umap_dim)
 rownames(final_umap_res) <- colnames(mat)
 colnames(final_umap_res) <- paste0("UMAP", seq(umap_dim))
 
@@ -691,17 +691,22 @@ if(length(assay_hit)){
 	ATAC_info <- atac2metacell_info
 	RNA_info <- rna2metacell_info
 	df <- data.frame(umap1= Sub[[reduction]]@cell.embeddings[, 1], umap2= Sub[[reduction]]@cell.embeddings[, 2], assays= assays)
-	df$Seurat_celltype <- Sub@meta.data$Celltypes_refined
+	df$Seurat_celltype <- original_celltypes
 #df$Seurat_celltype <- as.character(Sub@meta.data$seurat_clusters)
 	df <- cbind(df[c(ATAC_info$barcode, RNA_info$barcode), ], rbind(ATAC_info, RNA_info))
 	celltypes <- sapply(as.character(df$metacell), function(i) strsplit(i, "_")[[1]][1])
 	uniq_celltypes <- unique(celltypes)
 	df$celltype <- celltypes
 
-	pdf(paste0(output_file, "/plot_umap_mc_", expected_cells, ".pdf")); print(ggplot(df, aes(x= umap1, y= umap2, shape= assays, colour= Seurat_celltype)) + geom_point(alpha= .6) + theme_classic()); for(i in seq(length(unique(celltypes)))) {myPlot <- ggplot(subset(df, celltype == uniq_celltypes[i]), aes(x= umap1, y= umap2, shape= assays)) + geom_point(aes(colour= metacell)) + ggtitle(uniq_celltypes[i]) + theme_classic(); print(addSmallLegend(myPlot))}; dev.off()
+	pdf(paste0(output_file, "/plot_umap_mc_", expected_cells, ".pdf"));
+	print(ggplot(df, aes(x= umap1, y= umap2, shape= assays, colour= Seurat_celltype)) + geom_point(alpha= .6) + theme_classic() + geom_text(aes(label= Seurat_celltype),hjust=0, vjust=0, size= 3, check_overlap = T));
+	for(i in seq(length(unique(celltypes)))) {
+		myPlot <- ggplot(subset(df, celltype == uniq_celltypes[i]), aes(x= umap1, y= umap2, shape= assays)) + geom_point(aes(colour= metacell)) + ggtitle(uniq_celltypes[i]) + theme_classic(); print(addSmallLegend(myPlot))
+	};
+	dev.off()
 
 ###############
-	df2 <- data.frame(umap1= Sub[[reduction]]@cell.embeddings[, 1], umap2= Sub[[reduction]]@cell.embeddings[, 2], assays= assays, Seurat_celltype= Sub@meta.data$Celltypes_refined)
+	df2 <- data.frame(umap1= Sub[[reduction]]@cell.embeddings[, 1], umap2= Sub[[reduction]]@cell.embeddings[, 2], assays= assays, Seurat_celltype= original_celltypes)
 	pdf(paste0("plot_umap_seurat_", expected_cells, ".pdf")); for(i in seq(length(unique(celltypes)))) {print(ggplot(subset(df2, Seurat_celltype == uniq_celltypes[i]), aes(x= umap1, y= umap2, shape= Seurat_celltype, colour= assays)) + geom_point(alpha= .6) + ggtitle(uniq_celltypes[i]) + theme_classic())}; dev.off()
 ###############
 
