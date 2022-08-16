@@ -10,6 +10,7 @@ library(data.table)
 library(ggplot2)
 library(ggdendro)
 library(cowplot)
+library(DESeq2)
 ########################
 summary_method <- "kmed_means" #kmed
 iter_flag <- F
@@ -28,7 +29,10 @@ argsexpr <- commandArgs(trailingOnly= T)
 #argsexpr <- c("-file /projects/triangulate/archive/rna_atac_merged_coembedded_harmonized.rds", "-RNA assays$RNA@counts", "-celltype meta.data$Celltypes_refined", "-output testUMAPfullKoptimized_100_UMAP2", "-umap T", "-assay meta.data$datasets2", "-ATAC assays$peaks@counts", "-e 100", "-d 20")
 #-RNA 'assays$RNA@data' -celltype 'meta.data$Celltypes_refined'
 
-defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e", "-t", "-d", "-reduction")
+#argsexpr <- c("-file /projects/triangulate/work/MetaCellaR/MetaCellaR/data/GSE139369/GSE139369_integrated_sc_rna_atac_healthy_trimmedCellNames.rds", "-RNA assays$RNA@counts", "-celltype meta.data$bio.classification", "-output /projects/triangulate/work/GAZE/GAZE/R/metacell_MPAL_e30_d20", "-umap T", "-assay meta.data$identity", "-ATAC assays$peaks@counts", "-e 30", "-d 20", "-gtf /projects/abcpp/work/base_data/gencode.v38lift37.basic.annotation.gtf")
+
+
+defined_args <- c("-file", "-RNA", "-celltype", "-output", "-k", "-assay", "-umap", "-ATAC", "-e", "-t", "-d", "-reduction", "-gtf")
 arg_tokens <- unlist(strsplit(argsexpr, split= " "))
 file_hit <- which(arg_tokens == defined_args[1])
 RNA_hit <- which(arg_tokens == defined_args[2])
@@ -42,10 +46,14 @@ expCnt_hit <- which(arg_tokens == defined_args[9])
 t_hit <- which(arg_tokens == defined_args[10])
 d_hit <- which(arg_tokens == defined_args[11])
 reduction_hit <- which(arg_tokens == defined_args[12])
+gtf_hit <- which(arg_tokens == defined_args[13])
 if(length(reduction_hit)){
 	reduction <- arg_tokens[reduction_hit + 1]
 }else{
 	reduction <- "umap" ## default UMAP that should be in the Seurat integration
+}
+if(length(gtf_hit)){
+	gtf_file <- arg_tokens[gtf_hit + 1]
 }
 if(length(umap_hit)){
 	umap_flag <- as.logical(arg_tokens[umap_hit + 1])
@@ -137,11 +145,12 @@ if(!csv_flag){
 		print(head(ATAC_umap))
 	  celltypes <- RNA_celltypes
 	  cell_types <- unique(celltypes)
+		umap_layout <- RNA_umap
   }
 }else{
   cell_types <- unique(csv_cells[, 2])
 }
-if(umap_flag){
+if(umap_flag && !length(assay_hit)){
 	print("Computing UMAP")
 	ptm <- proc.time()
 	if(csv_flag){
@@ -206,6 +215,14 @@ my_knn <- function(train, test, k= 1, threshold= 3 * expected_cells){
 		}else{
 			dist_mat[i, hit] <- Inf;
 		}
+	}
+	if(F){
+  	load("mojitoo_counts_metacell_30/kmed_means_clustered.RData")
+	  train <- RNA_metacell_umap
+	  test <- ATAC_umap;
+	  threshold <- 90
+  	df <- data.frame(umap1= test[1:15, 1], umap2= test[1:15, 2], assay= "ATAC", label= labels[1:15])
+  	df <- rbind(df, data.frame(umap1= train[c(219, 301, 462, 527), 1], umap2= train[c(219, 301, 462, 527), 2], assay= c("RNA", "RNA", "RNA", "RNA"), label= rownames(train)[c(219, 301, 462, 527)]))
 	}
 	return(labels)
 
@@ -359,6 +376,7 @@ merge_small_mc <- function(clustering, thresh= 30){
 ## optimize with 30 or different slack and see if it makes sense to do the second pass
 mc_quality_info <- list()
 mc_outlier_info <- list()
+RNA_metacell_umap_plot <- list()
 RNA_barcodes_ct <- NULL
 mc_distr <- list()
 ks_info <- list()
@@ -496,7 +514,8 @@ for(ct in cell_types){
 			if(length(assay_hit)){
 				RNA_metacell_umap_ct <- NULL
 				for(i in unique(clusters[[ct]]$clustering)){
-					data_subset <- RNA_umap[which(clusters[[ct]]$clustering == i), ];
+					#data_subset <- RNA_umap[which(clusters[[ct]]$clustering == i), ];
+					data_subset <- clusters[[ct]]$data[which(clusters[[ct]]$clustering == i), ];
 					if(is.null(dim(data_subset))){
 						RNA_metacell_umap_ct <- rbind(RNA_metacell_umap_ct, data_subset);
 					}else{
@@ -507,6 +526,7 @@ for(ct in cell_types){
 				rownames(RNA_metacell_umap_ct) <- paste(ct, unique(clusters[[ct]]$clustering), sep= "_")
 				print(paste("Done clustering", ct))
 				RNA_metacell_umap <- rbind(RNA_metacell_umap, RNA_metacell_umap_ct)
+				RNA_metacell_umap_plot[[ct]] <- RNA_metacell_umap_ct
 			}
 			#RNA_barcodes_ct <- c(RNA_barcodes_ct, colnames(original_CT_cluster))
 			RNA_barcodes_ct <- c(RNA_barcodes_ct, rownames(cluster_data[[ct]]))
@@ -531,37 +551,38 @@ for(ct in cell_types){
 }
 dev.off()
 save(ks_info, mc_distr, mc_quality_info, mc_outlier_info, cluster_data, clusters, file= paste0(output_file, "_clusters_heart_debug.Rdata"))
-if(pass_max > 1){
-	mc_qual <- as.data.table(sapply(seq(length(mc_quality_info)), function(i) unlist(mc_quality_info[[i]])))
-	colnames(mc_qual) <- names(mc_quality_info)
-	mc_qual[, pass := seq(1, 3)]
+if(F){
+	if(pass_max > 1){
+		mc_qual <- as.data.table(sapply(seq(length(mc_quality_info)), function(i) unlist(mc_quality_info[[i]])))
+		colnames(mc_qual) <- names(mc_quality_info)
+		mc_qual[, pass := seq(1, 3)]
 
-	mc_outlier <- as.data.table(sapply(seq(length(mc_outlier_info)), function(i) unlist(mc_outlier_info[[i]])))
-	colnames(mc_outlier) <- names(mc_outlier_info)
-	mc_outlier[, pass := seq(1, 3)]
-
-
-	ks_dt <- as.data.table(sapply(seq(length(ks_info)), function(i) unlist(ks_info[[i]])))
-	colnames(ks_dt) <- names(ks_info)
-	ks_dt[, pass := seq(1, 3)]
+		mc_outlier <- as.data.table(sapply(seq(length(mc_outlier_info)), function(i) unlist(mc_outlier_info[[i]])))
+		colnames(mc_outlier) <- names(mc_outlier_info)
+		mc_outlier[, pass := seq(1, 3)]
 
 
+		ks_dt <- as.data.table(sapply(seq(length(ks_info)), function(i) unlist(ks_info[[i]])))
+		colnames(ks_dt) <- names(ks_info)
+		ks_dt[, pass := seq(1, 3)]
 
-	dt <- NULL;
-	for(i in seq(length(mc_distr)))
-		for(j in seq(length(mc_distr[[i]]))){
-			dt <- rbind(dt, data.table(clusters= mc_distr[[i]][[j]], pass= as.character(j), celltype= names(mc_distr)[i]))
-		}
 
-	pdf(paste0(output_file, "_mc_qual_freq.pdf")); ggplot(melt(mc_qual, id.vars= "pass", variable.name= "cell_type", value.name= "quality"), aes(x= pass, y= quality)) + geom_point() + geom_line() + facet_wrap(~cell_type) + theme(axis.text.x= element_text(angle= 45)); ggplot(melt(mc_outlier, id.vars= "pass", variable.name= "cell_type", value.name= "outlier"), aes(x= pass, y= outlier)) + geom_point() + geom_line() + facet_wrap(~cell_type) + theme(axis.text.x= element_text(angle= 45));
-	ggplot(melt(ks_dt, id.vars= "pass", variable.name= "cell_type", value.name= "k"), aes(x= pass, y= k)) + geom_point() + geom_line() + facet_wrap(~cell_type, scales= "free") + theme(axis.text.x= element_text(angle= 45));
+
+		dt <- NULL;
+		for(i in seq(length(mc_distr)))
+			for(j in seq(length(mc_distr[[i]]))){
+				dt <- rbind(dt, data.table(clusters= mc_distr[[i]][[j]], pass= as.character(j), celltype= names(mc_distr)[i]))
+			}
+
+		pdf(paste0(output_file, "_mc_qual_freq.pdf")); ggplot(melt(mc_qual, id.vars= "pass", variable.name= "cell_type", value.name= "quality"), aes(x= pass, y= quality)) + geom_point() + geom_line() + facet_wrap(~cell_type) + theme(axis.text.x= element_text(angle= 45)); ggplot(melt(mc_outlier, id.vars= "pass", variable.name= "cell_type", value.name= "outlier"), aes(x= pass, y= outlier)) + geom_point() + geom_line() + facet_wrap(~cell_type) + theme(axis.text.x= element_text(angle= 45));
+		ggplot(melt(ks_dt, id.vars= "pass", variable.name= "cell_type", value.name= "k"), aes(x= pass, y= k)) + geom_point() + geom_line() + facet_wrap(~cell_type, scales= "free") + theme(axis.text.x= element_text(angle= 45));
 #for(i in seq(length(unique(dt$celltype))))
 #ggplot(dt) + geom_histogram(aes(x= clusters, fill= pass)) + facet_wrap(~celltype, scales= "free");
-	dt$clusters <- factor(dt$clusters)
-	ggplot(dt) + geom_bar(astat = "identity", position = 'dodge', aes(x= clusters, fill= pass)) + geom_hline(yintercept= 10, linetype= "dashed", color= "black")+ facet_wrap(~celltype, scales= "free") + theme(axis.text.x= element_text(angle= 45, size= 3));
-	dev.off()
+		dt$clusters <- factor(dt$clusters)
+		ggplot(dt) + geom_bar(astat = "identity", position = 'dodge', aes(x= clusters, fill= pass)) + geom_hline(yintercept= 10, linetype= "dashed", color= "black")+ facet_wrap(~celltype, scales= "free") + theme(axis.text.x= element_text(angle= 45, size= 3));
+		dev.off()
+	}
 }
-
 print("Done clustering!")
 mat <- NULL
 mat_sum <- NULL
@@ -601,8 +622,6 @@ for(i in seq(length(clusters))){
       	}
     	}
 		}
-		print(dim(temp_cl))
-		print(dim(temp_cl_sum))
     mat <- cbind(mat, t(temp_cl))
     mat_sum <- cbind(mat_sum, t(temp_cl_sum))
   }
@@ -611,7 +630,12 @@ for(i in seq(length(clusters))){
 print("done making mat")
 
 colnames(mat) <- colnames(mat_sum) <- mc_names
-
+## Normalize the average metacell read counts by sequencing depth to compute the CPM values
+#mat_norm <- mat/matrix(rep(colSums(mat), times= nrow(mat)), byrow = T, nrow = nrow(mat)) * 10^6 ## my version
+dds <- DESeqDataSetFromMatrix(mat_sum, DataFrame(colnames(mat_sum)), ~1);
+dds <- DESeq(dds);
+#print(head(sizeFactors(dds)));
+normalized_counts_all <- counts(dds, normalized=TRUE)
 ##############################
 ##############################
 final_umap_res <- uwot::umap(t(mat), pca= 30, pca_center= T, scale= T, n_components= umap_dim)
@@ -637,13 +661,66 @@ if(length(assay_hit)){
 	write.csv(atac2metacell_info, paste0(output_file, "/ATAC_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 }
 
+train <- RNA_metacell_umap
+test <- ATAC_umap
+colnames(train) <- NULL
+colnames(test) <- NULL                                                                                                                                   
+df <- data.frame(train, assay= "mcRNA", celltype= sapply(rownames(train), function(i)strsplit(i, "_")[[1]][1]))
+df <- rbind(df, data.frame(test, assay= "scATAC", celltype= "unlabled"))
+colnames(df)[seq(ncol(train))] <- paste0("UMAP", seq(ncol(train)))
+
+library(viridis)
+pdf(paste0(output_file, "/mcRNA_ATAC_UMAP.pdf"))
+print(ggplot(df, aes(x= UMAP1, y= UMAP2, shape= assay, colour= celltype, label= celltype)) + geom_point(alpha= .5) + ggtitle("UMAP of mcRNAs vs scATACs") + geom_text(aes(label= ifelse(celltype != "unlabled", as.character(celltype), '')), hjust=0, vjust=0, size= 3, check_overlap = T) + scale_color_viridis(discrete=TRUE) + theme_bw())
+dev.off()
+
+
+if(length(gtf_hit)){
+## Compute TPM on normalized metacells ## Following the suggestion here: biostars.org/p/456800/
+	library(GenomicFeatures)
+	gtf <- as.data.frame(rtracklayer::import(gtf_file))
+	gtf_genes <- subset(gtf, type == "gene")
+
+	txdb <- makeTxDbFromGFF(gtf_file, format="gtf")
+	exons.list.per.gene <- exonsBy(txdb, by="gene")
+	exonic.gene.sizes <- as.data.frame(sum(width(reduce(exons.list.per.gene))))
+
+	gene_df <- merge(gtf_genes[, c("gene_id", "gene_name")], exonic.gene.sizes, by.x= "gene_id", by.y= 0)
+	dup_hits <- which(duplicated(gene_df$gene_name) == T)
+	for(dpl in unique(gene_df$gene_name[dup_hits])){
+		tmp_row <- gene_df[which(gene_df$gene_name == dpl)[1], ]
+		tmp_row[, 3] <- floor(mean(gene_df[-which(gene_df$gene_name == dpl), 3])) ## Take the average of exonic size for the duplicated genes
+		gene_df <- gene_df[-which(gene_df$gene_name == dpl), ]
+		gene_df <- rbind(gene_df, tmp_row)
+	}
+	colnames(gene_df)[3] <- "exonic_len"
+
+	expr_mat_df <- merge(normalized_counts_all, gene_df[, c(2, 3)], by.x= 0, by.y= "gene_name")
+	rownames(expr_mat_df) <- expr_mat_df$Row.names
+	expr_mat_df <- expr_mat_df[, -which(colnames(expr_mat_df) == "Row.names")]
+	exonic.gene.sizes.expr <- expr_mat_df$exonic_len
+	expr_mat_df <- expr_mat_df[, -which(colnames(expr_mat_df) == "exonic_len")]
+	norm_len <- expr_mat_df / matrix(rep(exonic.gene.sizes.expr, each= ncol(expr_mat_df)), ncol= ncol(expr_mat_df), byrow= T)
+	tpm.mat <- t( t(norm_len) * 1e6 / colSums(norm_len) )
+	write.csv(tpm.mat, paste0(output_file, "/cellSummarized_normalized_TPM_", summary_method, ".csv"))
+
+}
 rna2metacell_info <- data.frame(barcode= RNA_barcodes_ct, metacell= cell2metacell_info)
 write.csv(rna2metacell_info, paste0(output_file, "/RNA_cell2metacell_info_", summary_method, ".csv"), row.names= F)
 write.csv(mat, paste0(output_file, "/cellSummarized_", summary_method, ".csv"))
+write.csv(normalized_counts_all, paste0(output_file, "/cellSummarized_normalized_", summary_method, ".csv"))
 write.csv(mat_sum, paste0(output_file, "/cellSummarized_", summary_method, "_sum.csv"))
 write.csv(final_umap_res, paste0(output_file, "/RNA_metacell_umap_", summary_method, ".csv"))
 if(length(assay_hit)){
 	save(atac2metacell_info, ATACcounts, clusters, RNA_metacell_umap, ATAC_umap, mc_names, file= paste0(output_file, "/", summary_method, "_clustered.RData"))
+
+	## Normalize the ATAC reads based on total read counts
+	total_ATAC <- colSums(ATACcounts)
+	total_ATAC[which(total_ATAC == 0)] <- 1 ## If a cell had zero reads across all peaks, I assign a non-zero value to that total reads to avoid division by zero
+	#ATACcounts_depthNorm <- ATACcounts / matrix(rep(total_ATAC, times= nrow(ATACcounts)), nrow= ATACcounts, byrow= T)
+	ATACcounts_depthNorm <- t(t(ATACcounts) / total_ATAC)
+	ATACcounts_depthNorm <- ATACcounts_depthNorm * 1e6
+	ATACcounts <- ATACcounts_depthNorm
 
 	uniq_mc <- unique(atac2metacell_info$metacell)
 	atac_metacell <- NULL;
@@ -651,11 +728,11 @@ if(length(assay_hit)){
 	for(i in seq(length(uniq_mc))){
 		hits <- atac2metacell_info$barcode[which(atac2metacell_info$metacell == uniq_mc[i])];
 		if(length(hits) > 1){
-			atac_metacell <- cbind(atac_metacell, rowMeans(as.matrix(ATACcounts)[, hits]))
-			atac_metacell_sum <- cbind(atac_metacell_sum, rowSums(as.matrix(ATACcounts)[, hits]))
+			atac_metacell <- cbind(atac_metacell, rowMeans(ATACcounts[, hits]))
+			atac_metacell_sum <- cbind(atac_metacell_sum, rowSums(ATACcounts[, hits]))
 		}else{
-			atac_metacell <- cbind(atac_metacell, as.matrix(ATACcounts)[, hits])
-			atac_metacell_sum <- cbind(atac_metacell_sum, as.matrix(ATACcounts)[, hits])
+			atac_metacell <- cbind(atac_metacell, ATACcounts[, hits])
+			atac_metacell_sum <- cbind(atac_metacell_sum, ATACcounts[, hits])
 		}
 	}
 	colnames(atac_metacell) <- uniq_mc
@@ -678,7 +755,6 @@ if(length(assay_hit)){
 #################################################
 ############# BEGIN VISUALIZATION ###############
 
-	library(ggplot2)
 	addSmallLegend <- function(myPlot, pointSize = 0.5, textSize = 3, spaceLegend = 0.1) {
 		myPlot +
 			guides(shape = guide_legend(override.aes = list(size = pointSize)),
@@ -688,6 +764,22 @@ if(length(assay_hit)){
 ####
 ###
 ##
+## Plot metacells within the scRNA:
+df_mc_code <- NULL;
+
+for(i in names(RNA_metacell_umap_plot)){
+	df_mc_code <- rbind(df_mc_code, data.frame(umap1= clusters[[i]]$data[, 1], umap2= clusters[[i]]$data[, 2], type= "scRNA", celltype= i));
+	df_mc_code <- rbind(df_mc_code, data.frame(umap1= RNA_metacell_umap_plot[[i]][, 1], umap2= RNA_metacell_umap_plot[[i]][, 2], type= "mcRNA", celltype= i))
+}
+#pdf(paste0(output_file, "/mcRNA_vs_scRNA_UMAP.pdf")); print(ggplot(df_mc_code, aes(x= umap1, y= umap2,shape= celltype, colour= type)) + geom_point()); dev.off()
+pdf(paste0(output_file, "/mcRNA_vs_scRNA_UMAP.pdf")); print(ggplot(df_mc_code, aes(x= umap1, y= umap2, colour= celltype, shape= type)) + geom_point());
+for(i in unique(df_mc_code$celltype)){
+	print(ggplot(subset(df_mc_code, celltype == i), aes(x= umap1, y= umap2, colour= type, shape= celltype)) + geom_point() + theme_classic() + ggtitle(i))
+}
+dev.off()
+############
+############
+
 	ATAC_info <- atac2metacell_info
 	RNA_info <- rna2metacell_info
 	df <- data.frame(umap1= Sub[[reduction]]@cell.embeddings[, 1], umap2= Sub[[reduction]]@cell.embeddings[, 2], assays= assays)
@@ -701,7 +793,7 @@ if(length(assay_hit)){
 	pdf(paste0(output_file, "/plot_umap_mc_", expected_cells, ".pdf"));
 	print(ggplot(df, aes(x= umap1, y= umap2, shape= assays, colour= Seurat_celltype)) + geom_point(alpha= .6) + theme_classic() + geom_text(aes(label= Seurat_celltype),hjust=0, vjust=0, size= 3, check_overlap = T));
 	for(i in seq(length(unique(celltypes)))) {
-		myPlot <- ggplot(subset(df, celltype == uniq_celltypes[i]), aes(x= umap1, y= umap2, shape= assays)) + geom_point(aes(colour= metacell)) + ggtitle(uniq_celltypes[i]) + theme_classic(); print(addSmallLegend(myPlot))
+		myPlot <- ggplot(subset(df, celltype == uniq_celltypes[i]), aes(x= umap1, y= umap2, shape= assays)) + geom_point(aes(colour= metacell)) + ggtitle(uniq_celltypes[i]) + theme_classic() + geom_text(aes(label= metacell),hjust=0, vjust=0, size= 3, check_overlap = T); print(addSmallLegend(myPlot))
 	};
 	dev.off()
 
@@ -758,3 +850,5 @@ if(length(assay_hit)){
 		dev.off()
 	}
 }
+
+
